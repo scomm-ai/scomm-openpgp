@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 set(PROJECT_NAME "scomm_openpgp")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
-set(SCOMM_OPENPGP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+# Flutter points CMAKE_CURRENT_SOURCE_DIR at .plugin_symlinks; resolve before Cargo.toml.
+get_filename_component(_SCOMM_OPENPGP_MACOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
+get_filename_component(SCOMM_OPENPGP_ROOT "${_SCOMM_OPENPGP_MACOS_DIR}/../../.." ABSOLUTE)
 set(SCOMM_OPENPGP_DYLIB "${SCOMM_OPENPGP_ROOT}/target/release/libscomm_openpgp.dylib")
 
 add_custom_command(
