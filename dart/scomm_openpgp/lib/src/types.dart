@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 class ScommOpenPgpException implements Exception {
   ScommOpenPgpException(this.code, this.message);
 
@@ -131,6 +133,13 @@ enum OpenPgpKeyProfile {
 
   const OpenPgpKeyProfile(this.wire);
   final int wire;
+}
+
+class CompositePopSignatures {
+  const CompositePopSignatures({required this.mldsa, required this.ed25519});
+
+  final Uint8List mldsa;
+  final Uint8List ed25519;
 }
 
 List<String> _stringList(Object? raw) {

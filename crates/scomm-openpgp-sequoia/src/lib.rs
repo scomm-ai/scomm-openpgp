@@ -19,6 +19,7 @@ use scomm_openpgp_core::*;
 mod decrypt;
 mod inspect;
 mod policy;
+mod pop;
 
 pub use policy::{decrypt_policy, generate_policy};
 
@@ -276,6 +277,30 @@ impl OpenPgpProvider for SequoiaOpenPgp {
             return Err(OpenPgpError::InvalidKey("no secret keys".into()));
         }
         Ok(())
+    }
+
+    fn pop_sign_composite(
+        &self,
+        data: &[u8],
+        private_key: &[u8],
+        passphrase: Option<&str>,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        pop::pop_sign_composite(data, private_key, passphrase)
+    }
+
+    fn pop_hybrid_shared(
+        &self,
+        private_key: &[u8],
+        passphrase: Option<&str>,
+        kem_ciphertext: &[u8],
+        ephemeral_x25519: &[u8],
+    ) -> Result<Vec<u8>> {
+        pop::pop_hybrid_shared(
+            private_key,
+            passphrase,
+            kem_ciphertext,
+            ephemeral_x25519,
+        )
     }
 }
 

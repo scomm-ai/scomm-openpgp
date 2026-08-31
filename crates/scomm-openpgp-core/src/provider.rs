@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{OpenPgpError, Result};
 use crate::types::*;
 
 /// Bytes-in / bytes-out OpenPGP operations. No vault, network, or filesystem.
@@ -68,4 +68,31 @@ pub trait OpenPgpProvider: Send + Sync {
 
     /// Unlocks secret key material with [passphrase] (empty/none if unprotected).
     fn test_passphrase(&self, private_key: &[u8], passphrase: Option<&str>) -> Result<()>;
+
+    /// Raw ML-DSA-65 and Ed25519 signatures over [data] (artifact_pop UTF-8).
+    fn pop_sign_composite(
+        &self,
+        data: &[u8],
+        private_key: &[u8],
+        passphrase: Option<&str>,
+    ) -> Result<(Vec<u8>, Vec<u8>)> {
+        let _ = (data, private_key, passphrase);
+        Err(OpenPgpError::UnsupportedAlgorithm(
+            "composite artifact PoP signing".into(),
+        ))
+    }
+
+    /// `mlkem_shared || x25519_shared` for hybrid encrypt PoP (caller SHA-256s like the server).
+    fn pop_hybrid_shared(
+        &self,
+        private_key: &[u8],
+        passphrase: Option<&str>,
+        kem_ciphertext: &[u8],
+        ephemeral_x25519: &[u8],
+    ) -> Result<Vec<u8>> {
+        let _ = (private_key, passphrase, kem_ciphertext, ephemeral_x25519);
+        Err(OpenPgpError::UnsupportedAlgorithm(
+            "hybrid artifact PoP decaps".into(),
+        ))
+    }
 }

@@ -65,6 +65,20 @@ int32_t scomm_openpgp_test_passphrase(
     const uint8_t *private_key, size_t private_key_len,
     const uint8_t *passphrase, size_t passphrase_len);
 
+int32_t scomm_openpgp_pop_sign_composite(
+    const uint8_t *data, size_t data_len,
+    const uint8_t *private_key, size_t private_key_len,
+    const uint8_t *passphrase, size_t passphrase_len,
+    uint8_t **mldsa_out, size_t *mldsa_len,
+    uint8_t **ed25519_out, size_t *ed25519_len);
+
+int32_t scomm_openpgp_pop_hybrid_shared(
+    const uint8_t *private_key, size_t private_key_len,
+    const uint8_t *passphrase, size_t passphrase_len,
+    const uint8_t *kem_ciphertext, size_t kem_ciphertext_len,
+    const uint8_t *ephemeral_x25519, size_t ephemeral_x25519_len,
+    uint8_t **out, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif
