@@ -45,6 +45,8 @@ pub struct OpenPgpSubkeyInfo {
     pub fingerprint: OpenPgpFingerprint,
     pub key_id: OpenPgpKeyId,
     pub algorithm: String,
+    /// OpenPGP public-key algorithm ID (RFC 9580 / 9980).
+    pub algorithm_id: u8,
     pub capabilities: Vec<OpenPgpKeyUsage>,
 }
 
@@ -55,6 +57,8 @@ pub struct OpenPgpKeyInfo {
     pub identities: Vec<OpenPgpIdentity>,
     /// Catalog-style name when known (`openpgp-ed25519`, `openpgp-mlkem768-x25519`).
     pub algorithm: String,
+    /// OpenPGP public-key algorithm ID of the primary key.
+    pub algorithm_id: u8,
     pub created_at: Option<i64>,
     pub expires_at: Option<i64>,
     pub revoked: bool,
@@ -65,10 +69,32 @@ pub struct OpenPgpKeyInfo {
     pub subkeys: Vec<OpenPgpSubkeyInfo>,
 }
 
+impl OpenPgpKeyInfo {
+    /// RFC 9980 composite (IDs 30 / 35) on the primary or any subkey.
+    pub fn is_pqc(&self) -> bool {
+        is_rfc9980_id(self.algorithm_id)
+            || self.subkeys.iter().any(|s| is_rfc9980_id(s.algorithm_id))
+    }
+
+    pub fn is_pqc_signing(&self) -> bool {
+        self.algorithm_id == 30 || is_pqc_signing_catalog(&self.algorithm)
+    }
+}
+
+pub fn is_rfc9980_id(id: u8) -> bool {
+    id == 30 || id == 35
+}
+
+pub fn is_pqc_signing_catalog(name: &str) -> bool {
+    name.eq_ignore_ascii_case("openpgp-mldsa65-ed25519")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyProfile {
     /// Ed25519 certification/signing + X25519 encryption (v4). Default.
     ClassicalCv25519,
+    /// RFC 9980 MUST: ML-DSA-65+Ed25519 primary + ML-KEM-768+X25519 subkey (v6).
+    Rfc9980MlDsa65,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

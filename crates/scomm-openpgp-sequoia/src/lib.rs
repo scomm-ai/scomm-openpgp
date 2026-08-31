@@ -9,9 +9,11 @@ use sequoia_openpgp::parse::Parse;
 use sequoia_openpgp::policy::StandardPolicy;
 use sequoia_openpgp::serialize::stream::{Armorer, Encryptor, LiteralWriter, Message, Signer};
 use sequoia_openpgp::serialize::SerializeInto;
+use sequoia_openpgp::cert::CipherSuite;
 use sequoia_openpgp::types::PublicKeyAlgorithm;
 use sequoia_openpgp::Cert;
 use sequoia_openpgp::KeyHandle;
+use sequoia_openpgp::Profile;
 use scomm_openpgp_core::*;
 
 mod decrypt;
@@ -40,6 +42,10 @@ impl Default for SequoiaOpenPgp {
 }
 
 impl OpenPgpProvider for SequoiaOpenPgp {
+    fn rfc9980_ready(&self) -> bool {
+        CipherSuite::MLDSA65_Ed25519.is_supported().is_ok()
+    }
+
     fn inspect_key(&self, key: &[u8]) -> Result<OpenPgpKeyInfo> {
         let cert = parse_cert(key)?;
         reject_librepgp(&cert)?;
@@ -52,9 +58,14 @@ impl OpenPgpProvider for SequoiaOpenPgp {
                 "userid is required (e.g. Name <user@example.com>)".into(),
             ));
         }
-        let KeyProfile::ClassicalCv25519 = options.profile;
-
         let mut builder = CertBuilder::general_purpose(Some(options.userid.as_str()));
+        builder = match options.profile {
+            KeyProfile::ClassicalCv25519 => builder.set_cipher_suite(CipherSuite::Cv25519),
+            KeyProfile::Rfc9980MlDsa65 => builder
+                .set_profile(Profile::RFC9580)
+                .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
+                .set_cipher_suite(CipherSuite::MLDSA65_Ed25519),
+        };
         if let Some(ref pw) = options.passphrase {
             if !pw.is_empty() {
                 builder = builder.set_password(Some(Password::from(pw.as_str())));

@@ -25,6 +25,7 @@ fn generate_inspect_export() {
     assert!(key.info.identities.iter().any(|i| {
         i.email.as_deref() == Some("alice@example.com")
     }));
+    assert!(!key.info.is_pqc());
     assert!(key
         .info
         .capabilities
@@ -165,4 +166,50 @@ fn passphrase_protected_decrypt() {
     assert!(p.test_passphrase(&key.secret, None).is_err());
     p.test_passphrase(&key.secret, Some("correct-horse"))
         .unwrap();
+}
+
+#[test]
+fn rfc9980_generate_encrypt_sign_when_supported() {
+    let p = pgp();
+    if !p.rfc9980_ready() {
+        return;
+    }
+    let key = p
+        .generate_key(&GenerateKeyOptions {
+            userid: "Pqc <pqc@example.com>".into(),
+            passphrase: None,
+            profile: KeyProfile::Rfc9980MlDsa65,
+        })
+        .expect("rfc9980 generate");
+    assert!(key.info.is_pqc(), "expected PQC catalog/ids: {:?}", key.info);
+    assert!(key.info.is_pqc_signing());
+    assert_eq!(key.info.algorithm_id, 30);
+    assert!(
+        key.info
+            .subkeys
+            .iter()
+            .any(|s| s.algorithm_id == 35 || s.algorithm.contains("mlkem")),
+        "expected ML-KEM subkey: {:?}",
+        key.info.subkeys
+    );
+
+    let ct = p
+        .encrypt(b"pqc hello", &[&key.public], &EncryptOptions::default())
+        .unwrap();
+    let pt = p.decrypt(&ct, &key.secret, None).unwrap();
+    assert_eq!(pt.plaintext, b"pqc hello");
+
+    let sig = p
+        .sign(
+            b"pqc signed",
+            &key.secret,
+            None,
+            &SignOptions {
+                armored: false,
+                detached: true,
+            },
+        )
+        .unwrap();
+    let v = p.verify(b"pqc signed", &sig.bytes, &key.public).unwrap();
+    assert_eq!(v.validity, SignatureValidity::CryptographicallyValid);
 }

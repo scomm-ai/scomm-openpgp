@@ -73,6 +73,7 @@ fn key_info_json(info: &OpenPgpKeyInfo) -> String {
                 "fingerprint": s.fingerprint.to_hex(),
                 "key_id": s.key_id.to_hex(),
                 "algorithm": s.algorithm,
+                "algorithm_id": s.algorithm_id,
                 "capabilities": s.capabilities.iter().map(|c| usage_str(*c)).collect::<Vec<_>>(),
             })
         })
@@ -81,6 +82,9 @@ fn key_info_json(info: &OpenPgpKeyInfo) -> String {
         "fingerprint": info.fingerprint.to_hex(),
         "key_id": info.key_id.to_hex(),
         "algorithm": info.algorithm,
+        "algorithm_id": info.algorithm_id,
+        "is_pqc": info.is_pqc(),
+        "is_pqc_signing": info.is_pqc_signing(),
         "created_at": info.created_at,
         "expires_at": info.expires_at,
         "revoked": info.revoked,
@@ -187,6 +191,7 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
     userid_len: usize,
     passphrase: *const u8,
     passphrase_len: usize,
+    profile: i32,
     public_out: *mut *mut u8,
     public_len: *mut usize,
     secret_out: *mut *mut u8,
@@ -200,12 +205,20 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
     } else {
         Some(String::from_utf8_lossy(read_slice(passphrase, passphrase_len)).into_owned())
     };
+    let profile = match profile {
+        0 => KeyProfile::ClassicalCv25519,
+        1 => KeyProfile::Rfc9980MlDsa65,
+        _ => {
+            set_error("unknown key profile".into());
+            return OpenPgpError::InvalidArgument("profile".into()).code();
+        }
+    };
     run(|| {
         clear_error();
         let generated = engine().generate_key(&GenerateKeyOptions {
             userid,
             passphrase: pass,
-            profile: KeyProfile::ClassicalCv25519,
+            profile,
         })?;
         unsafe {
             write_buf(&generated.public, public_out, public_len);
@@ -214,6 +227,15 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
         }
         Ok(0)
     })
+}
+
+#[no_mangle]
+pub extern "C" fn scomm_openpgp_rfc9980_ready() -> i32 {
+    if engine().rfc9980_ready() {
+        1
+    } else {
+        0
+    }
 }
 
 #[no_mangle]

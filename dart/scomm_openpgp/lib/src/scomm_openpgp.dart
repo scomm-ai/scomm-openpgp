@@ -36,6 +36,7 @@ typedef _GenerateN = ffi.Int32 Function(
   ffi.Size,
   ffi.Pointer<ffi.Uint8>,
   ffi.Size,
+  ffi.Int32,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
@@ -48,6 +49,7 @@ typedef _GenerateD = int Function(
   int,
   ffi.Pointer<ffi.Uint8>,
   int,
+  int,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
@@ -55,6 +57,8 @@ typedef _GenerateD = int Function(
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
 );
+typedef _Rfc9980ReadyN = ffi.Int32 Function();
+typedef _Rfc9980ReadyD = int Function();
 typedef _ExportN = ffi.Int32 Function(
   ffi.Pointer<ffi.Uint8>,
   ffi.Size,
@@ -192,6 +196,9 @@ class ScommOpenPgp {
         _generate = _lib.lookupFunction<_GenerateN, _GenerateD>(
           'scomm_openpgp_generate',
         ),
+        _rfc9980Ready = _lib.lookupFunction<_Rfc9980ReadyN, _Rfc9980ReadyD>(
+          'scomm_openpgp_rfc9980_ready',
+        ),
         _exportPublic = _lib.lookupFunction<_ExportN, _ExportD>(
           'scomm_openpgp_export_public',
         ),
@@ -234,6 +241,7 @@ class ScommOpenPgp {
     int,
     ffi.Pointer<ffi.Uint8>,
     int,
+    int,
     ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
     ffi.Pointer<ffi.Size>,
     ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
@@ -241,6 +249,7 @@ class ScommOpenPgp {
     ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
     ffi.Pointer<ffi.Size>,
   ) _generate;
+  final int Function() _rfc9980Ready;
   final int Function(
     ffi.Pointer<ffi.Uint8>,
     int,
@@ -299,6 +308,8 @@ class ScommOpenPgp {
 
   int get abiVersion => _abiVersion();
 
+  bool get rfc9980Ready => _rfc9980Ready() != 0;
+
   OpenPgpKeyInspect inspectKey(List<int> key) {
     return OpenPgpKeyInspect.fromJson(
       jsonDecode(utf8.decode(_call1(key, _inspect))) as Map<String, dynamic>,
@@ -308,6 +319,7 @@ class ScommOpenPgp {
   GeneratedOpenPgpKey generateKey({
     required String userid,
     String passphrase = '',
+    OpenPgpKeyProfile profile = OpenPgpKeyProfile.classicalCv25519,
   }) {
     return using((arena) {
       final user = _copy(arena, utf8.encode(userid));
@@ -323,6 +335,7 @@ class ScommOpenPgp {
         user.len,
         pass.ptr,
         pass.len,
+        profile.wire,
         pubPtr,
         pubLen,
         secPtr,

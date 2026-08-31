@@ -73,6 +73,7 @@ pub fn key_info(cert: &Cert, p: &StandardPolicy<'_>) -> Result<OpenPgpKeyInfo> {
                 fingerprint: fingerprint_of(ka.key().fingerprint()),
                 key_id: key_id_of(&ka.key().keyid()),
                 algorithm: catalog_name(ka.key().pk_algo()),
+                algorithm_id: u8::from(ka.key().pk_algo()),
                 capabilities: caps,
             });
         }
@@ -88,6 +89,7 @@ pub fn key_info(cert: &Cert, p: &StandardPolicy<'_>) -> Result<OpenPgpKeyInfo> {
         key_id: key_id_of(&cert.keyid()),
         identities,
         algorithm: catalog_name(primary.key().pk_algo()),
+        algorithm_id: u8::from(primary.key().pk_algo()),
         created_at: created,
         expires_at: expires,
         revoked,

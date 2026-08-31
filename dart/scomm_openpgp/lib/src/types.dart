@@ -21,11 +21,13 @@ class OpenPgpSubkeyInspect {
     required this.keyId,
     required this.algorithm,
     required this.capabilities,
+    this.algorithmId = 0,
   });
 
   final String fingerprint;
   final String keyId;
   final String algorithm;
+  final int algorithmId;
   final List<String> capabilities;
 }
 
@@ -40,6 +42,7 @@ class OpenPgpKeyInspect {
     required this.capabilities,
     required this.identities,
     required this.subkeys,
+    this.algorithmId = 0,
     this.createdAt,
     this.expiresAt,
   });
@@ -47,6 +50,7 @@ class OpenPgpKeyInspect {
   final String fingerprint;
   final String keyId;
   final String algorithm;
+  final int algorithmId;
   final int? createdAt;
   final int? expiresAt;
   final bool revoked;
@@ -56,11 +60,29 @@ class OpenPgpKeyInspect {
   final List<OpenPgpIdentityInfo> identities;
   final List<OpenPgpSubkeyInspect> subkeys;
 
+  static const _rfc9980Ids = {30, 35};
+
+  bool get isPqc =>
+      _rfc9980Ids.contains(algorithmId) ||
+      subkeys.any((s) => _rfc9980Ids.contains(s.algorithmId)) ||
+      algorithm.toLowerCase().contains('mldsa') ||
+      algorithm.toLowerCase().contains('mlkem') ||
+      subkeys.any(
+        (s) =>
+            s.algorithm.toLowerCase().contains('mldsa') ||
+            s.algorithm.toLowerCase().contains('mlkem'),
+      );
+
+  bool get isPqcSigning =>
+      algorithmId == 30 ||
+      algorithm.toLowerCase() == 'openpgp-mldsa65-ed25519';
+
   factory OpenPgpKeyInspect.fromJson(Map<String, dynamic> json) {
     return OpenPgpKeyInspect(
       fingerprint: json['fingerprint'] as String? ?? '',
       keyId: json['key_id'] as String? ?? '',
       algorithm: json['algorithm'] as String? ?? '',
+      algorithmId: (json['algorithm_id'] as num?)?.toInt() ?? 0,
       createdAt: (json['created_at'] as num?)?.toInt(),
       expiresAt: (json['expires_at'] as num?)?.toInt(),
       revoked: json['revoked'] as bool? ?? false,
@@ -82,6 +104,7 @@ class OpenPgpKeyInspect {
               fingerprint: raw['fingerprint'] as String? ?? '',
               keyId: raw['key_id'] as String? ?? '',
               algorithm: raw['algorithm'] as String? ?? '',
+              algorithmId: (raw['algorithm_id'] as num?)?.toInt() ?? 0,
               capabilities: _stringList(raw['capabilities']),
             ),
       ],
@@ -99,6 +122,15 @@ class GeneratedOpenPgpKey {
   final List<int> public;
   final List<int> secret;
   final OpenPgpKeyInspect info;
+}
+
+/// Generate profile. Matches C ABI `profile` on `scomm_openpgp_generate`.
+enum OpenPgpKeyProfile {
+  classicalCv25519(0),
+  rfc9980MlDsa65(1);
+
+  const OpenPgpKeyProfile(this.wire);
+  final int wire;
 }
 
 List<String> _stringList(Object? raw) {

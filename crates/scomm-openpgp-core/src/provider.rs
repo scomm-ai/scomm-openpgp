@@ -7,6 +7,11 @@ pub trait OpenPgpProvider: Send + Sync {
 
     fn generate_key(&self, options: &GenerateKeyOptions) -> Result<GeneratedKey>;
 
+    /// True when this backend can generate and use RFC 9980 MUST algorithms.
+    fn rfc9980_ready(&self) -> bool {
+        false
+    }
+
     fn export_public_key(&self, secret_or_public: &[u8]) -> Result<Vec<u8>>;
 
     fn sign(

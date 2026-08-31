@@ -19,9 +19,12 @@ int32_t scomm_openpgp_inspect(
 int32_t scomm_openpgp_generate(
     const uint8_t *userid, size_t userid_len,
     const uint8_t *passphrase, size_t passphrase_len,
+    int32_t profile,
     uint8_t **public_out, size_t *public_len,
     uint8_t **secret_out, size_t *secret_len,
     uint8_t **json_out, size_t *json_len);
+
+int32_t scomm_openpgp_rfc9980_ready(void);
 
 int32_t scomm_openpgp_export_public(
     const uint8_t *key, size_t key_len,
