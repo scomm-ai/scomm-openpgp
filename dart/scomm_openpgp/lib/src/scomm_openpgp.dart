@@ -555,7 +555,7 @@ class ScommOpenPgp {
   }
 
   static ({ffi.Pointer<ffi.Uint8> ptr, int len}) _copy(
-    Allocator arena,
+    ffi.Allocator arena,
     List<int> bytes,
   ) {
     if (bytes.isEmpty) {
