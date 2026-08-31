@@ -1,0 +1,23 @@
+[package]
+name = "scomm-openpgp-sequoia"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Sequoia-openpgp backend for scomm-openpgp-core. The only crate that may depend on Sequoia."
+
+[features]
+default = ["rustcrypto"]
+# Local/dev when OpenSSL 3.5 is not installed. Not the production PQC backend.
+rustcrypto = [
+    "sequoia-openpgp/crypto-rust",
+    "sequoia-openpgp/allow-experimental-crypto",
+    "sequoia-openpgp/allow-variable-time-crypto",
+]
+# Production: OpenSSL ≥ 3.5 (RFC 9980 + shared CMS later). Requires OPENSSL_DIR on MSVC.
+openssl = ["sequoia-openpgp/crypto-openssl"]
+
+[dependencies]
+scomm-openpgp-core.workspace = true
+sequoia-openpgp = { workspace = true, default-features = false }
+anyhow = "1"

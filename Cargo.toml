@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/scomm-openpgp-core",
+    "crates/scomm-openpgp-sequoia",
+    "crates/scomm-openpgp-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.0-or-later"
+repository = "https://github.com/scomm-ai/scomm-openpgp"
+publish = false
+
+[workspace.dependencies]
+scomm-openpgp-core = { path = "crates/scomm-openpgp-core" }
+sequoia-openpgp = { version = "=2.4.1", default-features = false }
