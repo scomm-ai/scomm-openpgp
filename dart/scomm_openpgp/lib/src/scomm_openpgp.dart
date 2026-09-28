@@ -625,9 +625,7 @@ class ScommOpenPgp {
       if (code != 0) {
         throw ScommOpenPgpException(code, _readLastError());
       }
-      final bytes = Uint8List.fromList(out.value.asTypedList(outLen.value));
-      _free(out.value, outLen.value);
-      return bytes;
+      return Uint8List.fromList(_take(out.value, outLen.value));
     });
   }
 
