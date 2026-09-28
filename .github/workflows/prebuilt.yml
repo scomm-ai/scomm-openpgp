@@ -2,10 +2,22 @@ name: Prebuilt libraries
 
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: Comma-separated rust triples. Empty runs every triple.
+        required: false
+        default: ""
+        type: string
+      reuse_run:
+        description: Run id whose artifacts fill triples that this run did not build.
+        required: false
+        default: ""
+        type: string
   push:
     branches: [main]
     paths-ignore:
       - "prebuilt/**"
+      - ".github/workflows/prebuilt.yml"
 
 permissions:
   contents: write
@@ -13,6 +25,10 @@ permissions:
 jobs:
   desktop:
     name: ${{ matrix.target }}
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.only == '' ||
+      contains(format(',{0},', inputs.only), format(',{0},', matrix.target))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -96,6 +112,10 @@ jobs:
 
   android:
     name: android ${{ matrix.target }}
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.only == '' ||
+      contains(format(',{0},', inputs.only), format(',{0},', matrix.target))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -131,6 +151,14 @@ jobs:
         env:
           ANDROID_NDK_ROOT: ${{ steps.nttld-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.nttld-ndk.outputs.ndk-path }}
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: aarch64-linux-android-clang
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: armv7-linux-androideabi-clang
+          CARGO_TARGET_I686_LINUX_ANDROID_LINKER: i686-linux-android-clang
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: x86_64-linux-android-clang
+          AR_aarch64_linux_android: llvm-ar
+          AR_armv7_linux_androideabi: llvm-ar
+          AR_i686_linux_android: llvm-ar
+          AR_x86_64_linux_android: llvm-ar
         run: cargo build --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
       - uses: actions/upload-artifact@v4
         with:
@@ -140,6 +168,10 @@ jobs:
 
   ios:
     name: ios ${{ matrix.target }}
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.only == '' ||
+      contains(format(',{0},', inputs.only), format(',{0},', matrix.target))
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -169,6 +201,10 @@ jobs:
 
   publish:
     needs: [desktop, android, ios]
+    if: >-
+      always() && !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,6 +213,21 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: prebuilt
+        continue-on-error: true
+      - name: Fill gaps from an earlier run
+        if: inputs.reuse_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.reuse_run }}" --repo "${{ github.repository }}" --dir /tmp/reuse
+          shopt -s nullglob
+          for dir in /tmp/reuse/*; do
+            name="$(basename "$dir")"
+            mkdir -p "prebuilt/$name"
+            if [ -z "$(ls -A "prebuilt/$name")" ]; then
+              cp -a "$dir"/. "prebuilt/$name/"
+            fi
+          done
       - name: Commit libraries
         run: |
           git config user.name "github-actions[bot]"
