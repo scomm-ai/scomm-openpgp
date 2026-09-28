@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       android:
-        description: JSON array of Android triples. Empty skips Android.
+        description: Comma-separated Android triples. Empty skips Android.
         required: false
         default: ""
         type: string
@@ -103,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.android || '["aarch64-linux-android","armv7-linux-androideabi","x86_64-linux-android","i686-linux-android"]') }}
+        target: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.android != '' && format('["{0}"]', replace(inputs.android, ',', '","')) || '["aarch64-linux-android","armv7-linux-androideabi","x86_64-linux-android","i686-linux-android"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: nttld/setup-ndk@v1
