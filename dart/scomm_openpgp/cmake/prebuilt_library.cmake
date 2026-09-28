@@ -21,4 +21,6 @@ if(NOT EXISTS "${_scomm_prebuilt_file}")
       "(${_scomm_prebuilt_msg}).")
   endif()
 endif()
-set(SCOMM_OPENPGP_PREBUILT "${_scomm_prebuilt_file}" PARENT_SCOPE)
+# include() shares the caller's scope. PARENT_SCOPE would hide this path
+# from the plugin CMakeLists that builds bundled_libraries.
+set(SCOMM_OPENPGP_PREBUILT "${_scomm_prebuilt_file}")
