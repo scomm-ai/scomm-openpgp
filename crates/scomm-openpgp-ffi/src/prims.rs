@@ -12,11 +12,27 @@ use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::signature::{OsslSignature, SigAlg, SigOp};
 use ossl::OsslSecret;
 
+fn init() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| unsafe {
+        // OPENSSL_INIT_NO_LOAD_CONFIG (0x80) is not exported by openssl-sys.
+        openssl_sys::OPENSSL_init_crypto(
+            0x80 | openssl_sys::OPENSSL_INIT_NO_ATEXIT,
+            std::ptr::null_mut(),
+        );
+        // Argon2id lanes run only when the libctx thread cap is at least `p`.
+        openssl_sys::OSSL_set_max_threads(std::ptr::null_mut(), 4);
+    });
+}
+
 fn ctx() -> ossl::OsslContext {
+    init();
     ossl::OsslContext::new_lib_ctx()
 }
 
 pub fn sha256(data: &[u8]) -> Result<Vec<u8>, String> {
+    init();
     hash(MessageDigest::sha256(), data)
         .map(|d| d.to_vec())
         .map_err(|e| e.to_string())
@@ -127,6 +143,69 @@ pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result
     verifier.verify_oneshot(signature, message).map_err(|e| e.to_string())
 }
 
+pub fn mldsa65_public(seed: &[u8]) -> Result<Vec<u8>, String> {
+    if seed.len() != 32 {
+        return Err("ml-dsa seed".into());
+    }
+    let c = ctx();
+    let key = EvpPkey::import(
+        &c,
+        EvpPkeyType::Mldsa65,
+        PkeyData::Mlkey(MlkeyData {
+            pubkey: None,
+            prikey: None,
+            seed: Some(OsslSecret::from_slice(seed)),
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    match key.export().map_err(|e| e.to_string())? {
+        PkeyData::Mlkey(MlkeyData { pubkey: Some(ref pk), .. }) => Ok(pk.clone()),
+        _ => Err("ml-dsa public".into()),
+    }
+}
+
+pub fn mldsa65_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, String> {
+    if public.len() != 1952 || signature.len() != 3309 {
+        return Err("ml-dsa lengths".into());
+    }
+    let c = ctx();
+    let mut key = EvpPkey::import(
+        &c,
+        EvpPkeyType::Mldsa65,
+        PkeyData::Mlkey(MlkeyData {
+            pubkey: Some(public.to_vec()),
+            prikey: None,
+            seed: None,
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut verifier = OsslSignature::new(&c, SigOp::Verify, SigAlg::Mldsa65, &mut key, None)
+        .map_err(|e| e.to_string())?;
+    Ok(verifier
+        .verify(message, Some(signature))
+        .map_err(|e| e.to_string())
+        .is_ok())
+}
+
+/// Seed is ML-DSA-65 (32) then Ed25519 (32). Signature is ML-DSA (3309) then Ed25519 (64).
+pub fn msk_sign(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+    if seed.len() != 64 {
+        return Err("msk seed".into());
+    }
+    let mut out = mldsa65_sign(&seed[..32], message)?;
+    out.extend(ed25519_sign(&seed[32..], message)?);
+    Ok(out)
+}
+
+pub fn msk_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, String> {
+    if public.len() != 1952 + 32 || signature.len() != 3309 + 64 {
+        return Err("msk lengths".into());
+    }
+    let ml = mldsa65_verify(&public[..1952], message, &signature[..3309])?;
+    let ed = ed25519_verify(&public[1952..], message, &signature[3309..])?;
+    Ok(ml && ed)
+}
+
 pub fn mldsa65_sign(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
     if seed.len() != 32 {
         return Err("ml-dsa seed".into());
@@ -176,6 +255,25 @@ mod tests {
         let mut bad = tag;
         bad[0] ^= 1;
         assert!(aes256gcm_decrypt(&key, &nonce, b"", &empty, &bad).is_err());
+    }
+
+    #[test]
+    fn kdf_and_random() {
+        let dk = pbkdf2_hmac_sha256(b"pw", b"salt", 1, 32).unwrap();
+        assert_eq!(dk.len(), 32);
+        let ak = argon2id_derive(b"pw", b"saltsalt", 1, 1, 8192, 32).unwrap();
+        assert_eq!(ak.len(), 32);
+        assert_eq!(random(16).unwrap().len(), 16);
+    }
+
+    #[test]
+    fn msk_roundtrip() {
+        let seed = [9u8; 64];
+        let sig = msk_sign(&seed, b"canonical").unwrap();
+        assert_eq!(sig.len(), 3309 + 64);
+        let mut public = mldsa65_public(&seed[..32]).unwrap();
+        public.extend(ed25519_from_seed(&seed[32..]).unwrap().0);
+        assert!(msk_verify(&public, b"canonical", &sig).unwrap());
     }
 
     #[test]

@@ -573,3 +573,110 @@ pub unsafe extern "C" fn scomm_prims_aes256gcm_decrypt(
         out_len,
     )
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pbkdf2_hmac_sha256(
+    password: *const u8,
+    password_len: usize,
+    salt: *const u8,
+    salt_len: usize,
+    iterations: usize,
+    out_len: usize,
+    out: *mut *mut u8,
+    out_out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::pbkdf2_hmac_sha256(
+            read_slice(password, password_len),
+            read_slice(salt, salt_len),
+            iterations,
+            out_len,
+        ),
+        out,
+        out_out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_argon2id(
+    password: *const u8,
+    password_len: usize,
+    salt: *const u8,
+    salt_len: usize,
+    iterations: u32,
+    lanes: u32,
+    mem_kib: u32,
+    out_len: usize,
+    out: *mut *mut u8,
+    out_out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::argon2id_derive(
+            read_slice(password, password_len),
+            read_slice(salt, salt_len),
+            iterations,
+            lanes,
+            mem_kib,
+            out_len,
+        ),
+        out,
+        out_out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_random(
+    n: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(prims::random(n), out, out_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_ed25519_sign(
+    seed: *const u8,
+    seed_len: usize,
+    message: *const u8,
+    message_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::ed25519_sign(read_slice(seed, seed_len), read_slice(message, message_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_mldsa65_sign(
+    seed: *const u8,
+    seed_len: usize,
+    message: *const u8,
+    message_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::mldsa65_sign(read_slice(seed, seed_len), read_slice(message, message_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_msk_sign(
+    seed: *const u8,
+    seed_len: usize,
+    message: *const u8,
+    message_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::msk_sign(read_slice(seed, seed_len), read_slice(message, message_len)),
+        out,
+        out_len,
+    )
+}

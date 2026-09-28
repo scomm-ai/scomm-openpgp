@@ -953,6 +953,7 @@ name = "scomm-openpgp-ffi"
 version = "0.1.0"
 dependencies = [
  "openssl",
+ "openssl-sys",
  "ossl",
  "scomm-openpgp-core",
  "scomm-openpgp-sequoia",
