@@ -150,6 +150,7 @@ fn armor_kind(kind: i32) -> Result<ArmorKind> {
 
 #[no_mangle]
 pub extern "C" fn scomm_openpgp_abi_version() -> u32 {
+    let _ = scomm_smime::link_anchor();
     ABI_VERSION
 }
 
