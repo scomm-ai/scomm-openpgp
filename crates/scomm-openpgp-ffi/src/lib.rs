@@ -407,6 +407,30 @@ pub unsafe extern "C" fn scomm_openpgp_test_passphrase(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_export_curve_secret(
+    private_key: *const u8,
+    private_key_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    signing: i32,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let private_key = read_slice(private_key, private_key_len).to_vec();
+    let pass = if passphrase.is_null() || passphrase_len == 0 {
+        None
+    } else {
+        Some(String::from_utf8_lossy(read_slice(passphrase, passphrase_len)).into_owned())
+    };
+    run(|| {
+        clear_error();
+        let secret = engine().export_curve_secret(&private_key, pass.as_deref(), signing != 0)?;
+        unsafe { write_buf(&secret, out, out_len) };
+        Ok(0)
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn scomm_openpgp_pop_sign_composite(
     data: *const u8,
     data_len: usize,

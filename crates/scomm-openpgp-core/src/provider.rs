@@ -83,6 +83,19 @@ pub trait OpenPgpProvider: Send + Sync {
     }
 
     /// `mlkem_shared || x25519_shared` for hybrid encrypt PoP (caller SHA-256s like the server).
+    /// 32-byte Ed25519 seed (`signing`) or X25519 secret from an unlocked key.
+    fn export_curve_secret(
+        &self,
+        private_key: &[u8],
+        passphrase: Option<&str>,
+        signing: bool,
+    ) -> Result<Vec<u8>> {
+        let _ = (private_key, passphrase, signing);
+        Err(OpenPgpError::UnsupportedAlgorithm(
+            "curve25519 secret export".into(),
+        ))
+    }
+
     fn pop_hybrid_shared(
         &self,
         private_key: &[u8],

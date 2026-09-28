@@ -583,6 +583,54 @@ class ScommOpenPgp {
     });
   }
 
+  /// 32-byte Ed25519 seed or X25519 secret from an unlocked OpenPGP key.
+  Uint8List exportCurveSecret({
+    required List<int> privateKey,
+    String passphrase = '',
+    required bool signing,
+  }) {
+    final fn = _lib.lookupFunction<
+        ffi.Int32 Function(
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Size,
+          ffi.Pointer<ffi.Uint8>,
+          ffi.Size,
+          ffi.Int32,
+          ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+          ffi.Pointer<ffi.Size>,
+        ),
+        int Function(
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          int,
+          ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+          ffi.Pointer<ffi.Size>,
+        )>('scomm_openpgp_export_curve_secret');
+    return using((arena) {
+      final sk = _copy(arena, privateKey);
+      final pass = _copy(arena, utf8.encode(passphrase));
+      final out = arena<ffi.Pointer<ffi.Uint8>>();
+      final outLen = arena<ffi.Size>();
+      final code = fn(
+        sk.ptr,
+        sk.len,
+        pass.ptr,
+        pass.len,
+        signing ? 1 : 0,
+        out,
+        outLen,
+      );
+      if (code != 0) {
+        throw ScommOpenPgpException(code, _readLastError());
+      }
+      final bytes = Uint8List.fromList(out.value.asTypedList(outLen.value));
+      _free(out.value, outLen.value);
+      return bytes;
+    });
+  }
+
   CompositePopSignatures popSignComposite({
     required List<int> data,
     required List<int> privateKey,

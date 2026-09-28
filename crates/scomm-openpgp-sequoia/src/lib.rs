@@ -288,6 +288,15 @@ impl OpenPgpProvider for SequoiaOpenPgp {
         pop::pop_sign_composite(data, private_key, passphrase)
     }
 
+    fn export_curve_secret(
+        &self,
+        private_key: &[u8],
+        passphrase: Option<&str>,
+        signing: bool,
+    ) -> Result<Vec<u8>> {
+        pop::export_curve_secret(private_key, passphrase, signing)
+    }
+
     fn pop_hybrid_shared(
         &self,
         private_key: &[u8],
