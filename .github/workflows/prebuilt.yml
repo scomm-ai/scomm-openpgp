@@ -30,6 +30,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   select:
@@ -89,6 +90,7 @@ jobs:
   desktop:
     name: ${{ matrix.target }}
     needs: select
+    if: needs.select.outputs.desktop != '[]'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -149,6 +151,7 @@ jobs:
   android:
     name: android ${{ matrix.target }}
     needs: select
+    if: needs.select.outputs.android != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -198,6 +201,7 @@ jobs:
   ios:
     name: ios ${{ matrix.target }}
     needs: select
+    if: needs.select.outputs.ios != '[]'
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -240,14 +244,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "${{ inputs.reuse_run }}" --repo "${{ github.repository }}" --dir /tmp/reuse
-          shopt -s nullglob
-          for dir in /tmp/reuse/*; do
-            name="$(basename "$dir")"
-            mkdir -p "prebuilt/$name"
-            if [ -z "$(ls -A "prebuilt/$name")" ]; then
-              cp -a "$dir"/. "prebuilt/$name/"
-            fi
+          IFS=',' read -ra runs <<< "${{ inputs.reuse_run }}"
+          for run_id in "${runs[@]}"; do
+            run_id="${run_id// /}"
+            [ -z "$run_id" ] && continue
+            rm -rf /tmp/reuse
+            gh run download "$run_id" --repo "${{ github.repository }}" --dir /tmp/reuse
+            shopt -s nullglob
+            for dir in /tmp/reuse/*; do
+              name="$(basename "$dir")"
+              mkdir -p "prebuilt/$name"
+              if [ -z "$(ls -A "prebuilt/$name")" ]; then
+                cp -a "$dir"/. "prebuilt/$name/"
+              fi
+            done
           done
       - name: Commit libraries
         run: |
