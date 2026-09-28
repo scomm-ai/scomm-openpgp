@@ -1,19 +1,22 @@
 //! Raw artifact PoP: dual-sign ID 30 and dual-KEM ID 35 without OpenPGP packets.
+//!
+//! Signing goes through Sequoia's public signer, so the OpenSSL backend
+//! produces both halves. The hybrid shared secret calls OpenSSL directly:
+//! Sequoia's public decrypt only returns a session key.
 
-use ed25519_dalek::{Signer as Ed25519Signer, SigningKey};
-use ml_dsa::{MlDsa65, SigningKey as MlDsaSigningKey};
-use ml_kem::kem::Decapsulate;
-use ml_kem::{DecapsulationKey, MlKem768};
-use sequoia_openpgp::crypto::mpi::SecretKeyMaterial as MpiSecret;
-use sequoia_openpgp::crypto::Password;
+use ossl::asymcipher::{EncOp, OsslAsymcipher};
+use ossl::OsslSecret;
+use ossl::derive::EcdhDerive;
+use ossl::pkey::{EccData, EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
+use sequoia_openpgp::crypto::mpi::{self, SecretKeyMaterial as MpiSecret};
+use sequoia_openpgp::crypto::{Password, Signer};
 use sequoia_openpgp::packet::key::SecretKeyMaterial;
+use sequoia_openpgp::types::HashAlgorithm;
 use sequoia_openpgp::Cert;
-use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 use scomm_openpgp_core::*;
 
 use crate::{parse_cert, reject_librepgp};
 
-const SPKI_X25519_LEN: usize = 44;
 const MLKEM_CT_LEN: usize = 1088;
 
 fn unlock_cert(private_key: &[u8], _passphrase: Option<&str>) -> Result<Cert> {
@@ -63,26 +66,20 @@ pub fn pop_sign_composite(
             continue;
         }
         let unlocked = unlock_key(ka.key().clone(), &pw)?;
-        return match unlocked.secret() {
-            SecretKeyMaterial::Unencrypted(unenc) => unenc.map(|mpis| match mpis {
-                MpiSecret::MLDSA65_Ed25519 { eddsa, mldsa } => {
-                    let ed_seed: [u8; 32] = eddsa[..]
-                        .try_into()
-                        .map_err(|_| OpenPgpError::InvalidKey("Ed25519 seed".into()))?;
-                    let ml_seed: [u8; 32] = mldsa[..]
-                        .try_into()
-                        .map_err(|_| OpenPgpError::InvalidKey("ML-DSA seed".into()))?;
-                    let ed_sig = SigningKey::from_bytes(&ed_seed).sign(data).to_bytes();
-                    let ml_key = MlDsaSigningKey::<MlDsa65>::from_seed((&ml_seed).into());
-                    use ml_dsa::signature::Signer;
-                    let ml_sig = Signer::sign(&ml_key, data).encode();
-                    Ok((ml_sig.to_vec(), ed_sig.to_vec()))
-                }
-                _ => Err(OpenPgpError::UnsupportedAlgorithm(
-                    "primary secret is not ML-DSA-65+Ed25519".into(),
-                )),
-            }),
-            SecretKeyMaterial::Encrypted(_) => Err(OpenPgpError::DecryptionFailed),
+        let mut pair = unlocked
+            .into_keypair()
+            .map_err(|_| OpenPgpError::InvalidKey("unlock ML-DSA-65+Ed25519".into()))?;
+        // Sequoia passes this buffer straight to Ed25519 and ML-DSA-65 for
+        // algorithm 30. It is the message, not a digest.
+        let signature = Signer::sign(&mut pair, HashAlgorithm::SHA256, data)
+            .map_err(|_| OpenPgpError::UnsupportedAlgorithm("composite sign".into()))?;
+        return match signature {
+            mpi::Signature::MLDSA65_Ed25519 { mldsa, eddsa } => {
+                Ok((mldsa.to_vec(), eddsa.as_ref().to_vec()))
+            }
+            _ => Err(OpenPgpError::UnsupportedAlgorithm(
+                "primary secret is not ML-DSA-65+Ed25519".into(),
+            )),
         };
     }
     Err(OpenPgpError::NoSuitableSigningKey)
@@ -94,8 +91,8 @@ fn x25519_raw(ephemeral: &[u8]) -> Result<[u8; 32]> {
             .try_into()
             .map_err(|_| OpenPgpError::InvalidArgument("x25519".into()));
     }
-    if ephemeral.len() == SPKI_X25519_LEN {
-        return ephemeral[SPKI_X25519_LEN - 32..]
+    if ephemeral.len() == 44 {
+        return ephemeral[12..]
             .try_into()
             .map_err(|_| OpenPgpError::InvalidArgument("x25519 spki".into()));
     }
@@ -115,9 +112,6 @@ pub fn pop_hybrid_shared(
             "ML-KEM-768 ciphertext must be 1088 octets".into(),
         ));
     }
-    let ct: [u8; MLKEM_CT_LEN] = kem_ciphertext
-        .try_into()
-        .map_err(|_| OpenPgpError::InvalidArgument("kem ct".into()))?;
     let eph = x25519_raw(ephemeral_x25519)?;
     let cert = unlock_cert(private_key, passphrase)?;
     let pw = password(passphrase);
@@ -132,20 +126,14 @@ pub fn pop_hybrid_shared(
                     let x_seed: [u8; 32] = ecdh[..]
                         .try_into()
                         .map_err(|_| OpenPgpError::InvalidKey("X25519 seed".into()))?;
-                    let kem_seed = mlkem[..].to_vec();
-                    if kem_seed.len() != 64 {
+                    if mlkem.len() != 64 {
                         return Err(OpenPgpError::InvalidKey("ML-KEM-768 seed".into()));
                     }
-                    let x_secret = StaticSecret::from(x_seed);
-                    let x_shared = x_secret.diffie_hellman(&X25519Public::from(eph));
-                    let decaps = DecapsulationKey::<MlKem768>::from_seed(
-                        (&kem_seed[..]).try_into().expect("64"),
-                    );
-                    let ml_shared = decaps.decapsulate((&ct).into());
-                    let ml_bytes: [u8; 32] = ml_shared.into();
+                    let ml_shared = mlkem_decaps(&mlkem[..], kem_ciphertext)?;
+                    let x_shared = x25519_dh(&x_seed, &eph)?;
                     let mut concat = Vec::with_capacity(64);
-                    concat.extend_from_slice(&ml_bytes);
-                    concat.extend_from_slice(x_shared.as_bytes());
+                    concat.extend_from_slice(&ml_shared);
+                    concat.extend_from_slice(&x_shared);
                     Ok(concat)
                 }
                 _ => Err(OpenPgpError::UnsupportedAlgorithm(
@@ -156,4 +144,61 @@ pub fn pop_hybrid_shared(
         };
     }
     Err(OpenPgpError::NoSuitableEncryptionKey)
+}
+
+fn ossl_ctx() -> ossl::OsslContext {
+    ossl::OsslContext::new_lib_ctx()
+}
+
+fn mlkem_decaps(seed: &[u8], ciphertext: &[u8]) -> Result<[u8; 32]> {
+    let ctx = ossl_ctx();
+    let mut key = EvpPkey::import(
+        &ctx,
+        EvpPkeyType::MlKem768,
+        PkeyData::Mlkey(MlkeyData {
+            pubkey: None,
+            prikey: None,
+            seed: Some(OsslSecret::from_slice(seed)),
+        }),
+    )
+    .map_err(|_| OpenPgpError::InvalidKey("ML-KEM-768 seed".into()))?;
+    let mut decap = OsslAsymcipher::new(&ctx, EncOp::Decapsulate, &mut key, None)
+        .map_err(|_| OpenPgpError::DecryptionFailed)?;
+    let shared = decap
+        .decapsulate(ciphertext)
+        .map_err(|_| OpenPgpError::DecryptionFailed)?;
+    let bytes: &[u8] = shared.as_ref();
+    bytes
+        .try_into()
+        .map_err(|_| OpenPgpError::DecryptionFailed)
+}
+
+fn x25519_dh(seed: &[u8; 32], ephemeral: &[u8; 32]) -> Result<[u8; 32]> {
+    let ctx = ossl_ctx();
+    let mut secret = EvpPkey::import(
+        &ctx,
+        EvpPkeyType::X25519,
+        PkeyData::Ecc(EccData {
+            pubkey: None,
+            prikey: Some(OsslSecret::from_slice(seed)),
+        }),
+    )
+    .map_err(|_| OpenPgpError::InvalidKey("X25519 seed".into()))?;
+    let mut public = EvpPkey::import(
+        &ctx,
+        EvpPkeyType::X25519,
+        PkeyData::Ecc(EccData {
+            pubkey: Some(ephemeral.to_vec()),
+            prikey: None,
+        }),
+    )
+    .map_err(|_| OpenPgpError::InvalidArgument("X25519 ephemeral".into()))?;
+    let mut deriver = EcdhDerive::new(&ctx, &mut secret).map_err(|_| OpenPgpError::DecryptionFailed)?;
+    let mut shared = vec![0u8; 32];
+    deriver
+        .derive(&mut public, &mut shared)
+        .map_err(|_| OpenPgpError::DecryptionFailed)?;
+    shared
+        .try_into()
+        .map_err(|_| OpenPgpError::DecryptionFailed)
 }

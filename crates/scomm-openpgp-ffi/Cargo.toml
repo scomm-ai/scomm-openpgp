@@ -10,11 +10,6 @@ description = "C ABI for scomm-openpgp (Dart / Flutter FFI)."
 name = "scomm_openpgp"
 crate-type = ["cdylib", "staticlib"]
 
-[features]
-default = ["rustcrypto"]
-rustcrypto = ["scomm-openpgp-sequoia/rustcrypto"]
-openssl = ["scomm-openpgp-sequoia/openssl"]
-
 [dependencies]
 scomm-openpgp-core.workspace = true
 scomm-openpgp-sequoia = { path = "../scomm-openpgp-sequoia", default-features = false }
