@@ -65,8 +65,19 @@ jobs:
           $install = & $vswhere -latest -property installationPath
           $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
           & $installer modify --installPath $install --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --quiet --norestart --wait
+      - name: Windows Perl
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = "C:\Strawberry\perl\bin\perl.exe"
+          if (-not (Test-Path $perl)) {
+            choco install strawberryperl -y
+          }
+          # Git Bash perl cannot load OpenSSL's Configure modules.
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "C:\Strawberry\c\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Build
-        shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -103,6 +114,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Put NDK clang on PATH
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.nttld-ndk.outputs.ndk-path }}
+        run: |
+          bin="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          api=21
+          ln -sfn "$bin/aarch64-linux-android${api}-clang" "$bin/aarch64-linux-android-clang"
+          ln -sfn "$bin/armv7a-linux-androideabi${api}-clang" "$bin/armv7a-linux-androideabi-clang"
+          ln -sfn "$bin/armv7a-linux-androideabi${api}-clang" "$bin/armv7-linux-androideabi-clang"
+          ln -sfn "$bin/armv7a-linux-androideabi${api}-clang" "$bin/arm-linux-androideabi-clang"
+          ln -sfn "$bin/i686-linux-android${api}-clang" "$bin/i686-linux-android-clang"
+          ln -sfn "$bin/x86_64-linux-android${api}-clang" "$bin/x86_64-linux-android-clang"
+          echo "$bin" >> "$GITHUB_PATH"
       - name: Build
         env:
           ANDROID_NDK_ROOT: ${{ steps.nttld-ndk.outputs.ndk-path }}
