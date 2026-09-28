@@ -32,16 +32,68 @@ permissions:
   contents: write
 
 jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.out.outputs.android }}
+      desktop: ${{ steps.out.outputs.desktop }}
+      ios: ${{ steps.out.outputs.ios }}
+    steps:
+      - id: out
+        env:
+          EVENT: ${{ github.event_name }}
+          SKIP: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[skip ci]') }}
+          ANDROID_IN: ${{ inputs.android }}
+          DESKTOP_IN: ${{ inputs.desktop }}
+          IOS_IN: ${{ inputs.ios }}
+        run: |
+          python3 << 'PY'
+          import json, os
+          event = os.environ["EVENT"]
+          skip = os.environ["SKIP"] == "true"
+          android_all = [
+              "aarch64-linux-android",
+              "armv7-linux-androideabi",
+              "x86_64-linux-android",
+              "i686-linux-android",
+          ]
+          desktop_all = [
+              {"os": "windows-latest", "target": "x86_64-pc-windows-msvc", "lib": "scomm_openpgp.dll"},
+              {"os": "windows-latest", "target": "i686-pc-windows-msvc", "lib": "scomm_openpgp.dll"},
+              {"os": "windows-latest", "target": "aarch64-pc-windows-msvc", "lib": "scomm_openpgp.dll"},
+              {"os": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu", "lib": "libscomm_openpgp.so"},
+              {"os": "ubuntu-latest", "target": "i686-unknown-linux-gnu", "lib": "libscomm_openpgp.so"},
+              {"os": "ubuntu-latest", "target": "aarch64-unknown-linux-gnu", "lib": "libscomm_openpgp.so"},
+              {"os": "macos-latest", "target": "aarch64-apple-darwin", "lib": "libscomm_openpgp.dylib"},
+              {"os": "macos-latest", "target": "x86_64-apple-darwin", "lib": "libscomm_openpgp.dylib"},
+          ]
+          ios_all = [
+              {"target": "aarch64-apple-ios", "sdk": "iphoneos"},
+              {"target": "aarch64-apple-ios-sim", "sdk": "iphonesimulator"},
+              {"target": "x86_64-apple-ios", "sdk": "iphonesimulator"},
+          ]
+          if event == "workflow_dispatch":
+              raw = os.environ["ANDROID_IN"].strip()
+              android = [part.strip() for part in raw.split(",") if part.strip()]
+              desktop = json.loads(os.environ["DESKTOP_IN"]) if os.environ["DESKTOP_IN"].strip() else []
+              ios = json.loads(os.environ["IOS_IN"]) if os.environ["IOS_IN"].strip() else []
+          elif skip:
+              android, desktop, ios = [], [], []
+          else:
+              android, desktop, ios = android_all, desktop_all, ios_all
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"android={json.dumps(android)}\n")
+              out.write(f"desktop={json.dumps(desktop)}\n")
+              out.write(f"ios={json.dumps(ios)}\n")
+          PY
   desktop:
     name: ${{ matrix.target }}
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.desktop != '') ||
-      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+    needs: select
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.desktop || '[{"os":"windows-latest","target":"x86_64-pc-windows-msvc","lib":"scomm_openpgp.dll"},{"os":"windows-latest","target":"i686-pc-windows-msvc","lib":"scomm_openpgp.dll"},{"os":"windows-latest","target":"aarch64-pc-windows-msvc","lib":"scomm_openpgp.dll"},{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","lib":"libscomm_openpgp.so"},{"os":"ubuntu-latest","target":"i686-unknown-linux-gnu","lib":"libscomm_openpgp.so"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu","lib":"libscomm_openpgp.so"},{"os":"macos-latest","target":"aarch64-apple-darwin","lib":"libscomm_openpgp.dylib"},{"os":"macos-latest","target":"x86_64-apple-darwin","lib":"libscomm_openpgp.dylib"}]') }}
+        include: ${{ fromJSON(needs.select.outputs.desktop) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -96,14 +148,12 @@ jobs:
 
   android:
     name: android ${{ matrix.target }}
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.android != '') ||
-      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+    needs: select
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.android != '' && format('["{0}"]', replace(inputs.android, ',', '","')) || '["aarch64-linux-android","armv7-linux-androideabi","x86_64-linux-android","i686-linux-android"]') }}
+        target: ${{ fromJSON(needs.select.outputs.android) }}
     steps:
       - uses: actions/checkout@v4
       - uses: nttld/setup-ndk@v1
@@ -147,14 +197,12 @@ jobs:
 
   ios:
     name: ios ${{ matrix.target }}
-    if: >-
-      (github.event_name == 'workflow_dispatch' && inputs.ios != '') ||
-      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+    needs: select
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.ios || '[{"target":"aarch64-apple-ios","sdk":"iphoneos"},{"target":"aarch64-apple-ios-sim","sdk":"iphonesimulator"},{"target":"x86_64-apple-ios","sdk":"iphonesimulator"}]') }}
+        include: ${{ fromJSON(needs.select.outputs.ios) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
