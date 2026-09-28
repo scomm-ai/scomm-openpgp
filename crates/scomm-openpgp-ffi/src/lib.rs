@@ -498,6 +498,16 @@ pub unsafe extern "C" fn scomm_prims_sha256(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn scomm_prims_sha512(
+    data: *const u8,
+    data_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(prims::sha512(read_slice(data, data_len)), out, out_len)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn scomm_prims_hmac_sha256(
     key: *const u8,
     key_len: usize,
@@ -645,6 +655,75 @@ pub unsafe extern "C" fn scomm_prims_ed25519_sign(
 ) -> i32 {
     prim_out(
         prims::ed25519_sign(read_slice(seed, seed_len), read_slice(message, message_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_ed25519_public(
+    seed: *const u8,
+    seed_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::ed25519_from_seed(read_slice(seed, seed_len)).map(|(public, _)| public),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_ed25519_verify(
+    public_key: *const u8,
+    public_key_len: usize,
+    message: *const u8,
+    message_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> i32 {
+    match prims::ed25519_verify(
+        read_slice(public_key, public_key_len),
+        read_slice(message, message_len),
+        read_slice(signature, signature_len),
+    ) {
+        Ok(true) => {
+            clear_error();
+            1
+        }
+        Ok(false) => {
+            clear_error();
+            0
+        }
+        Err(err) => {
+            set_error(err);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_x25519_public(
+    seed: *const u8,
+    seed_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(prims::x25519_public(read_slice(seed, seed_len)), out, out_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_x25519_dh(
+    seed: *const u8,
+    seed_len: usize,
+    peer: *const u8,
+    peer_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::x25519_dh(read_slice(seed, seed_len), read_slice(peer, peer_len)),
         out,
         out_len,
     )

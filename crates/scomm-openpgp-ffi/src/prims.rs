@@ -38,6 +38,13 @@ pub fn sha256(data: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
+pub fn sha512(data: &[u8]) -> Result<Vec<u8>, String> {
+    init();
+    hash(MessageDigest::sha512(), data)
+        .map(|d| d.to_vec())
+        .map_err(|e| e.to_string())
+}
+
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
     let pkey = PKey::hmac(key).map_err(|e| e.to_string())?;
     let mut signer = Signer::new(MessageDigest::sha256(), &pkey).map_err(|e| e.to_string())?;
@@ -134,6 +141,25 @@ pub fn ed25519_sign(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())?;
     let mut signer = Signer::new_without_digest(&secret).map_err(|e| e.to_string())?;
     signer.sign_oneshot_to_vec(message).map_err(|e| e.to_string())
+}
+
+pub fn x25519_public(seed: &[u8]) -> Result<Vec<u8>, String> {
+    if seed.len() != 32 {
+        return Err("x25519 seed".into());
+    }
+    let secret = PKey::private_key_from_raw_bytes(seed, openssl::pkey::Id::X25519)
+        .map_err(|e| e.to_string())?;
+    secret.raw_public_key().map_err(|e| e.to_string())
+}
+
+pub fn x25519_dh(seed: &[u8], peer: &[u8]) -> Result<Vec<u8>, String> {
+    let secret = PKey::private_key_from_raw_bytes(seed, openssl::pkey::Id::X25519)
+        .map_err(|e| e.to_string())?;
+    let public = PKey::public_key_from_raw_bytes(peer, openssl::pkey::Id::X25519)
+        .map_err(|e| e.to_string())?;
+    let mut deriver = openssl::derive::Deriver::new(&secret).map_err(|e| e.to_string())?;
+    deriver.set_peer(&public).map_err(|e| e.to_string())?;
+    deriver.derive_to_vec().map_err(|e| e.to_string())
 }
 
 pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, String> {
@@ -274,6 +300,15 @@ mod tests {
         let mut public = mldsa65_public(&seed[..32]).unwrap();
         public.extend(ed25519_from_seed(&seed[32..]).unwrap().0);
         assert!(msk_verify(&public, b"canonical", &sig).unwrap());
+    }
+
+    #[test]
+    fn x25519_agreement() {
+        let a = [4u8; 32];
+        let b = [5u8; 32];
+        let ap = x25519_public(&a).unwrap();
+        let bp = x25519_public(&b).unwrap();
+        assert_eq!(x25519_dh(&a, &bp).unwrap(), x25519_dh(&b, &ap).unwrap());
     }
 
     #[test]
