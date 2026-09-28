@@ -213,6 +213,18 @@ typedef _PopHybridN = ffi.Int32 Function(
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
 );
+typedef _Sha256N = ffi.Int32 Function(
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _Sha256D = int Function(
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
 typedef _PopHybridD = int Function(
   ffi.Pointer<ffi.Uint8>,
   int,
@@ -271,13 +283,24 @@ class ScommOpenPgp {
         ),
         _popHybrid = _lib.lookupFunction<_PopHybridN, _PopHybridD>(
           'scomm_openpgp_pop_hybrid_shared',
-        );
+        ),
+        _sha256 = _lib.lookupFunction<_Sha256N, _Sha256D>('scomm_prims_sha256');
 
   static ScommOpenPgp? _instance;
 
   static ScommOpenPgp get instance => _instance ??= ScommOpenPgp._(_open());
 
+  /// The loaded `libscomm_openpgp` handle. Other packages bind leaf symbols
+  /// with `@Native` against this library; they do not open a second one.
+  ffi.DynamicLibrary get library => _lib;
+
   final ffi.DynamicLibrary _lib;
+  final int Function(
+    ffi.Pointer<ffi.Uint8>,
+    int,
+    ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+    ffi.Pointer<ffi.Size>,
+  ) _sha256;
   final int Function() _abiVersion;
   final void Function(ffi.Pointer<ffi.Uint8>, int) _bufferFree;
   final int Function(
@@ -671,6 +694,19 @@ class ScommOpenPgp {
     });
   }
 
+  Uint8List sha256(List<int> data) {
+    return using((arena) {
+      final input = _copy(arena, data);
+      final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
+      final outLen = arena<ffi.Size>();
+      final rc = _sha256(input.ptr, input.len, outPtr, outLen);
+      if (rc != 0) {
+        throw ScommOpenPgpException(rc, _readLastError());
+      }
+      return Uint8List.fromList(_take(outPtr.value, outLen.value));
+    });
+  }
+
   List<int> _take(ffi.Pointer<ffi.Uint8> ptr, int len) {
     if (ptr == ffi.nullptr || len == 0) return const [];
     final bytes = ptr.asTypedList(len).toList(growable: false);
@@ -719,8 +755,11 @@ class ScommOpenPgp {
     if (Platform.isLinux) {
       return ffi.DynamicLibrary.open('libscomm_openpgp.so');
     }
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS || Platform.isIOS) {
       return ffi.DynamicLibrary.open('libscomm_openpgp.dylib');
+    }
+    if (Platform.isAndroid) {
+      return ffi.DynamicLibrary.open('libscomm_openpgp.so');
     }
     throw UnsupportedError(
       'scomm_openpgp has no bundled library for ${Platform.operatingSystem}',

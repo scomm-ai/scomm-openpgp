@@ -15,3 +15,4 @@ scomm-openpgp-core.workspace = true
 scomm-openpgp-sequoia = { path = "../scomm-openpgp-sequoia", default-features = false }
 serde_json = "1"
 openssl.workspace = true
+ossl = { version = "1.5.2", default-features = false, features = ["openssl-sys", "rfc9580"] }

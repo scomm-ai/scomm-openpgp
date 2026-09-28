@@ -5,6 +5,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 
+mod prims;
+
 use scomm_openpgp_core::*;
 use scomm_openpgp_sequoia::SequoiaOpenPgp;
 use serde_json::{json, Value};
@@ -467,4 +469,107 @@ pub unsafe extern "C" fn scomm_openpgp_pop_hybrid_shared(
         unsafe { write_buf(&shared, out, out_len) };
         Ok(0)
     })
+}
+
+fn prim_out(result: std::result::Result<Vec<u8>, String>, out: *mut *mut u8, out_len: *mut usize) -> i32 {
+    match result {
+        Ok(bytes) => {
+            clear_error();
+            unsafe { write_buf(&bytes, out, out_len) };
+            0
+        }
+        Err(err) => {
+            set_error(err);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_sha256(
+    data: *const u8,
+    data_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let data = read_slice(data, data_len);
+    prim_out(prims::sha256(data), out, out_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_hmac_sha256(
+    key: *const u8,
+    key_len: usize,
+    data: *const u8,
+    data_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::hmac_sha256(read_slice(key, key_len), read_slice(data, data_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_aes256gcm_encrypt(
+    key: *const u8,
+    key_len: usize,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    plaintext: *const u8,
+    plaintext_len: usize,
+    ct_out: *mut *mut u8,
+    ct_len: *mut usize,
+    tag_out: *mut *mut u8,
+    tag_len: *mut usize,
+) -> i32 {
+    match prims::aes256gcm_encrypt(
+        read_slice(key, key_len),
+        read_slice(nonce, nonce_len),
+        read_slice(aad, aad_len),
+        read_slice(plaintext, plaintext_len),
+    ) {
+        Ok((ct, tag)) => {
+            clear_error();
+            write_buf(&ct, ct_out, ct_len);
+            write_buf(&tag, tag_out, tag_len);
+            0
+        }
+        Err(err) => {
+            set_error(err);
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_aes256gcm_decrypt(
+    key: *const u8,
+    key_len: usize,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    tag: *const u8,
+    tag_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::aes256gcm_decrypt(
+            read_slice(key, key_len),
+            read_slice(nonce, nonce_len),
+            read_slice(aad, aad_len),
+            read_slice(ciphertext, ciphertext_len),
+            read_slice(tag, tag_len),
+        ),
+        out,
+        out_len,
+    )
 }
