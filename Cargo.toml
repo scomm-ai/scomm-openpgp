@@ -16,3 +16,13 @@ publish = false
 [workspace.dependencies]
 scomm-openpgp-core = { path = "crates/scomm-openpgp-core" }
 sequoia-openpgp = { version = "=2.4.1", default-features = false }
+openssl = { version = "0.10.78", features = ["vendored"] }
+
+[patch.crates-io]
+openssl-src = { git = "https://github.com/advforks/openssl-src-rs", rev = "83ef638c16afda3c3fe9ebf3b7966f991176e35c" }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
