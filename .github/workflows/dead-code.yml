@@ -1,0 +1,15 @@
+name: Dead code
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  cargo-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ban duplicate crypto crates
+        run: python3 scripts/check_dead_code.py --tree-only
