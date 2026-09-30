@@ -10,7 +10,10 @@ use sequoia_openpgp::policy::StandardPolicy;
 use sequoia_openpgp::serialize::stream::{Armorer, Encryptor, LiteralWriter, Message, Signer};
 use sequoia_openpgp::serialize::SerializeInto;
 use sequoia_openpgp::cert::CipherSuite;
-use sequoia_openpgp::types::PublicKeyAlgorithm;
+use sequoia_openpgp::packet::signature::SignatureBuilder;
+use sequoia_openpgp::types::{
+    AEADAlgorithm, PublicKeyAlgorithm, SignatureType, SymmetricAlgorithm,
+};
 use sequoia_openpgp::Cert;
 use sequoia_openpgp::KeyHandle;
 use sequoia_openpgp::Profile;
@@ -24,7 +27,12 @@ mod pop;
 pub use policy::{decrypt_policy, generate_policy};
 
 const ALG_ML_DSA_65_ED25519: u8 = 30;
+const ALG_ML_DSA_87_ED448: u8 = 31;
+const ALG_SLH_DSA_128S: u8 = 32;
+const ALG_SLH_DSA_128F: u8 = 33;
+const ALG_SLH_DSA_256S: u8 = 34;
 const ALG_ML_KEM_768_X25519: u8 = 35;
+const ALG_ML_KEM_1024_X448: u8 = 36;
 const ALG_LIBREPGP_KYBER_768: u8 = 105;
 const ALG_LIBREPGP_KYBER_1024: u8 = 106;
 
@@ -45,6 +53,7 @@ impl Default for SequoiaOpenPgp {
 impl OpenPgpProvider for SequoiaOpenPgp {
     fn rfc9980_ready(&self) -> bool {
         CipherSuite::MLDSA65_Ed25519.is_supported().is_ok()
+            && PublicKeyAlgorithm::MLKEM768_X25519.is_supported()
     }
 
     fn inspect_key(&self, key: &[u8]) -> Result<OpenPgpKeyInfo> {
@@ -76,9 +85,12 @@ impl OpenPgpProvider for SequoiaOpenPgp {
                 builder = builder.set_password(Some(Password::from(pw.as_str())));
             }
         }
-        let (cert, _revocation) = builder
+        let (mut cert, _revocation) = builder
             .generate()
             .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+        if options.profile == KeyProfile::Rfc9980MlDsa65 {
+            cert = advertise_pq_preferences(cert, options.passphrase.as_deref())?;
+        }
         reject_librepgp(&cert)?;
 
         let secret = cert
@@ -283,13 +295,37 @@ impl OpenPgpProvider for SequoiaOpenPgp {
         Ok(())
     }
 
-    fn pop_sign_composite(
+    fn sign_pop(
         &self,
         data: &[u8],
         private_key: &[u8],
         passphrase: Option<&str>,
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
-        pop::pop_sign_composite(data, private_key, passphrase)
+        notation: &str,
+    ) -> Result<Vec<u8>> {
+        let cert = parse_cert(private_key)?;
+        reject_librepgp(&cert)?;
+        let p = generate_policy();
+        let (keypair, _, _) = signing_keypair(&cert, passphrase, &p)?;
+        let template = SignatureBuilder::new(SignatureType::Binary)
+            .set_hash_algo(sequoia_openpgp::types::HashAlgorithm::SHA256)
+            .add_notation(notation, "1", None, true)
+            .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+        let mut sink = Vec::new();
+        {
+            let message = Message::new(&mut sink);
+            let mut signer = Signer::with_template(message, keypair, template)
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?
+                .detached()
+                .build()
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+            signer
+                .write_all(data)
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+            signer
+                .finalize()
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+        }
+        Ok(sink)
     }
 
     fn export_curve_secret(
@@ -301,20 +337,6 @@ impl OpenPgpProvider for SequoiaOpenPgp {
         pop::export_curve_secret(private_key, passphrase, signing)
     }
 
-    fn pop_hybrid_shared(
-        &self,
-        private_key: &[u8],
-        passphrase: Option<&str>,
-        kem_ciphertext: &[u8],
-        ephemeral_x25519: &[u8],
-    ) -> Result<Vec<u8>> {
-        pop::pop_hybrid_shared(
-            private_key,
-            passphrase,
-            kem_ciphertext,
-            ephemeral_x25519,
-        )
-    }
 }
 
 fn maybe_armor<'a>(
@@ -352,17 +374,30 @@ fn encrypt_message(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let recipients: Vec<_> = certs
-        .iter()
-        .flat_map(|cert| {
-            cert.keys()
-                .with_policy(&p, None)
-                .supported()
-                .alive()
-                .revoked(false)
-                .for_transport_encryption()
-        })
-        .collect();
+    let mut recipients = Vec::new();
+    for cert in &certs {
+        let keys: Vec<_> = cert
+            .keys()
+            .with_policy(&p, None)
+            .supported()
+            .alive()
+            .revoked(false)
+            .for_transport_encryption()
+            .collect();
+        let pq: Vec<_> = keys
+            .iter()
+            .filter(|ka| {
+                let id = u8::from(ka.key().pk_algo());
+                id == ALG_ML_KEM_768_X25519 || id == ALG_ML_KEM_1024_X448
+            })
+            .cloned()
+            .collect();
+        if pq.is_empty() {
+            recipients.extend(keys);
+        } else {
+            recipients.extend(pq);
+        }
+    }
     if recipients.is_empty() {
         return Err(OpenPgpError::NoSuitableEncryptionKey);
     }
@@ -372,6 +407,7 @@ fn encrypt_message(
         let message = Message::new(&mut sink);
         let message = maybe_armor(message, options.armored, SequoiaArmorKind::Message)?;
         let message = Encryptor::for_recipients(message, recipients)
+            .symmetric_algo(SymmetricAlgorithm::AES256)
             .build()
             .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
         let message = if let Some(keypair) = signing {
@@ -393,6 +429,46 @@ fn encrypt_message(
             .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
     }
     Ok(sink)
+}
+
+fn advertise_pq_preferences(cert: Cert, passphrase: Option<&str>) -> Result<Cert> {
+    let password = passphrase.filter(|s| !s.is_empty()).map(Password::from);
+    let userid = cert
+        .userids()
+        .next()
+        .ok_or_else(|| OpenPgpError::Internal("RFC 9980 certificate has no user id".into()))?;
+    let primary_fp = cert.fingerprint();
+    let key = cert
+        .keys()
+        .secret()
+        .find(|ka| ka.key().fingerprint() == primary_fp)
+        .ok_or_else(|| OpenPgpError::NoSuitableSigningKey)?
+        .key()
+        .clone();
+    let unlocked = if let Some(ref pw) = password {
+        key.decrypt_secret(pw)
+            .map_err(|_| OpenPgpError::InvalidKey("unlock primary for preferences".into()))?
+    } else {
+        key
+    };
+    let mut pair = unlocked
+        .into_keypair()
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+    let builder = SignatureBuilder::new(SignatureType::PositiveCertification)
+        .set_hash_algo(sequoia_openpgp::types::HashAlgorithm::SHA512)
+        .set_preferred_symmetric_algorithms(vec![SymmetricAlgorithm::AES256])
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))?
+        .set_preferred_aead_ciphersuites(vec![(SymmetricAlgorithm::AES256, AEADAlgorithm::OCB)])
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))?
+        .set_primary_userid(true)
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+    let signature = userid
+        .userid()
+        .bind(&mut pair, &cert, builder)
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))?;
+    cert.insert_packets(signature)
+        .map(|(cert, _)| cert)
+        .map_err(|e| OpenPgpError::Internal(e.to_string()))
 }
 
 fn signing_keypair(
@@ -462,7 +538,12 @@ pub(crate) fn catalog_name(algo: PublicKeyAlgorithm) -> String {
         22 => "openpgp-ed25519".into(),
         18 => "openpgp-cv25519".into(),
         ALG_ML_DSA_65_ED25519 => "openpgp-mldsa65-ed25519".into(),
+        ALG_ML_DSA_87_ED448 => "openpgp-mldsa87-ed448".into(),
+        ALG_SLH_DSA_128S => "openpgp-slhdsa-shake128s".into(),
+        ALG_SLH_DSA_128F => "openpgp-slhdsa-shake128f".into(),
+        ALG_SLH_DSA_256S => "openpgp-slhdsa-shake256s".into(),
         ALG_ML_KEM_768_X25519 => "openpgp-mlkem768-x25519".into(),
+        ALG_ML_KEM_1024_X448 => "openpgp-mlkem1024-x448".into(),
         1 | 2 | 3 => "openpgp-rsa".into(),
         other => format!("openpgp-pk-{other}"),
     }

@@ -432,53 +432,21 @@ pub unsafe extern "C" fn scomm_openpgp_export_curve_secret(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn scomm_openpgp_pop_sign_composite(
+pub unsafe extern "C" fn scomm_openpgp_sign_pop(
     data: *const u8,
     data_len: usize,
     private_key: *const u8,
     private_key_len: usize,
     passphrase: *const u8,
     passphrase_len: usize,
-    mldsa_out: *mut *mut u8,
-    mldsa_len: *mut usize,
-    ed25519_out: *mut *mut u8,
-    ed25519_len: *mut usize,
-) -> i32 {
-    let data = read_slice(data, data_len).to_vec();
-    let private_key = read_slice(private_key, private_key_len).to_vec();
-    let pass = if passphrase.is_null() || passphrase_len == 0 {
-        None
-    } else {
-        Some(String::from_utf8_lossy(read_slice(passphrase, passphrase_len)).into_owned())
-    };
-    run(|| {
-        clear_error();
-        let (mldsa, ed) =
-            engine().pop_sign_composite(&data, &private_key, pass.as_deref())?;
-        unsafe {
-            write_buf(&mldsa, mldsa_out, mldsa_len);
-            write_buf(&ed, ed25519_out, ed25519_len);
-        }
-        Ok(0)
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn scomm_openpgp_pop_hybrid_shared(
-    private_key: *const u8,
-    private_key_len: usize,
-    passphrase: *const u8,
-    passphrase_len: usize,
-    kem_ciphertext: *const u8,
-    kem_ciphertext_len: usize,
-    ephemeral_x25519: *const u8,
-    ephemeral_x25519_len: usize,
+    notation: *const u8,
+    notation_len: usize,
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
+    let data = read_slice(data, data_len).to_vec();
     let private_key = read_slice(private_key, private_key_len).to_vec();
-    let kem = read_slice(kem_ciphertext, kem_ciphertext_len).to_vec();
-    let eph = read_slice(ephemeral_x25519, ephemeral_x25519_len).to_vec();
+    let notation = String::from_utf8_lossy(read_slice(notation, notation_len)).into_owned();
     let pass = if passphrase.is_null() || passphrase_len == 0 {
         None
     } else {
@@ -486,13 +454,8 @@ pub unsafe extern "C" fn scomm_openpgp_pop_hybrid_shared(
     };
     run(|| {
         clear_error();
-        let shared = engine().pop_hybrid_shared(
-            &private_key,
-            pass.as_deref(),
-            &kem,
-            &eph,
-        )?;
-        unsafe { write_buf(&shared, out, out_len) };
+        let sig = engine().sign_pop(&data, &private_key, pass.as_deref(), &notation)?;
+        unsafe { write_buf(&sig, out, out_len) };
         Ok(0)
     })
 }

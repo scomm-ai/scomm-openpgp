@@ -269,3 +269,85 @@ fn rfc9580_classical_roundtrip_and_v4_still_decrypts() {
     assert_eq!(p.decrypt(&mixed, &v6.secret, None).unwrap().plaintext, b"mixed");
     assert_eq!(p.decrypt(&mixed, &v4.secret, None).unwrap().plaintext, b"mixed");
 }
+
+#[test]
+fn rfc9980_message_is_aes256_seipdv2_and_pop_signature_verifies() {
+    use sequoia_openpgp::cert::Preferences;
+    use sequoia_openpgp::packet::{Packet, Tag, SEIP};
+    use sequoia_openpgp::parse::Parse;
+    use sequoia_openpgp::policy::StandardPolicy;
+    use sequoia_openpgp::types::{AEADAlgorithm, SymmetricAlgorithm};
+    use sequoia_openpgp::{Cert, PacketPile};
+
+    let p = pgp();
+    if !p.rfc9980_ready() {
+        return;
+    }
+    let key = p
+        .generate_key(&GenerateKeyOptions {
+            userid: "Pqc <pqc@example.com>".into(),
+            passphrase: None,
+            profile: KeyProfile::Rfc9980MlDsa65,
+        })
+        .unwrap();
+    let ct = p
+        .encrypt(b"pqc hello", &[&key.public], &EncryptOptions::default())
+        .unwrap();
+    let pile = PacketPile::from_bytes(&ct).unwrap();
+    let mut pkesks = 0;
+    let mut saw_seip2 = false;
+    for pkt in pile.children() {
+        assert_ne!(pkt.tag(), Tag::SED, "obsolete SED packet");
+        match pkt {
+            Packet::SEIP(SEIP::V2(seip)) => {
+                assert_eq!(seip.symmetric_algo(), SymmetricAlgorithm::AES256);
+                assert_eq!(seip.aead(), AEADAlgorithm::OCB);
+                saw_seip2 = true;
+            }
+            Packet::PKESK(_) => pkesks += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(pkesks, 1);
+    assert!(saw_seip2);
+
+    let cert = Cert::from_bytes(&key.public).unwrap();
+    let policy = StandardPolicy::new();
+    let vc = cert.with_policy(&policy, None).unwrap();
+    let sym = vc.preferred_symmetric_algorithms().unwrap();
+    assert!(sym.contains(&SymmetricAlgorithm::AES256));
+    let aead = vc.preferred_aead_ciphersuites().unwrap();
+    assert!(aead.iter().any(|(sym, aead)| {
+        *sym == SymmetricAlgorithm::AES256 && *aead == AEADAlgorithm::OCB
+    }));
+
+    let pop = p
+        .sign_pop(b"artifact-pop", &key.secret, None, "scomm-pop@scomm.ai")
+        .unwrap();
+    assert_pop_signature(&pop, &key.public, b"artifact-pop");
+    let rejected = p.verify(b"artifact-pop", &pop, &key.public).unwrap();
+    assert_eq!(
+        rejected.validity,
+        SignatureValidity::CryptographicallyInvalid,
+        "mail verification must reject the critical PoP notation"
+    );
+}
+
+fn assert_pop_signature(sig_bytes: &[u8], _public: &[u8], _data: &[u8]) {
+    use sequoia_openpgp::packet::Packet;
+    use sequoia_openpgp::parse::Parse;
+    use sequoia_openpgp::PacketPile;
+
+    let pile = PacketPile::from_bytes(sig_bytes).unwrap();
+    let signature = match pile.children().next() {
+        Some(Packet::Signature(sig)) => sig,
+        other => panic!("expected a signature packet, got {other:?}"),
+    };
+    assert_eq!(signature.version(), 6);
+    assert!(
+        sig_bytes
+            .windows(b"scomm-pop@scomm.ai".len())
+            .any(|w| w == b"scomm-pop@scomm.ai"),
+        "missing PoP notation"
+    );
+}

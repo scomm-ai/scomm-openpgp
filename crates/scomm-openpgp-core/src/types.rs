@@ -77,16 +77,23 @@ impl OpenPgpKeyInfo {
     }
 
     pub fn is_pqc_signing(&self) -> bool {
-        self.algorithm_id == 30 || is_pqc_signing_catalog(&self.algorithm)
+        (30..=34).contains(&self.algorithm_id) || is_pqc_signing_catalog(&self.algorithm)
     }
 }
 
 pub fn is_rfc9980_id(id: u8) -> bool {
-    id == 30 || id == 35
+    (30..=36).contains(&id)
 }
 
 pub fn is_pqc_signing_catalog(name: &str) -> bool {
-    name.eq_ignore_ascii_case("openpgp-mldsa65-ed25519")
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "openpgp-mldsa65-ed25519"
+            | "openpgp-mldsa87-ed448"
+            | "openpgp-slhdsa-shake128s"
+            | "openpgp-slhdsa-shake128f"
+            | "openpgp-slhdsa-shake256s"
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

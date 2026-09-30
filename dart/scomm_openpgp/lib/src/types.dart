@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 class ScommOpenPgpException implements Exception {
   ScommOpenPgpException(this.code, this.message);
 
@@ -62,11 +60,11 @@ class OpenPgpKeyInspect {
   final List<OpenPgpIdentityInfo> identities;
   final List<OpenPgpSubkeyInspect> subkeys;
 
-  static const _rfc9980Ids = {30, 35};
+  static bool _isRfc9980(int id) => id >= 30 && id <= 36;
 
   bool get isPqc =>
-      _rfc9980Ids.contains(algorithmId) ||
-      subkeys.any((s) => _rfc9980Ids.contains(s.algorithmId)) ||
+      _isRfc9980(algorithmId) ||
+      subkeys.any((s) => _isRfc9980(s.algorithmId)) ||
       algorithm.toLowerCase().contains('mldsa') ||
       algorithm.toLowerCase().contains('mlkem') ||
       subkeys.any(
@@ -76,8 +74,9 @@ class OpenPgpKeyInspect {
       );
 
   bool get isPqcSigning =>
-      algorithmId == 30 ||
-      algorithm.toLowerCase() == 'openpgp-mldsa65-ed25519';
+      (algorithmId >= 30 && algorithmId <= 34) ||
+      algorithm.toLowerCase().startsWith('openpgp-mldsa') ||
+      algorithm.toLowerCase().startsWith('openpgp-slhdsa');
 
   factory OpenPgpKeyInspect.fromJson(Map<String, dynamic> json) {
     return OpenPgpKeyInspect(
@@ -137,13 +136,6 @@ enum OpenPgpKeyProfile {
 
   const OpenPgpKeyProfile(this.wire);
   final int wire;
-}
-
-class CompositePopSignatures {
-  const CompositePopSignatures({required this.mldsa, required this.ed25519});
-
-  final Uint8List mldsa;
-  final Uint8List ed25519;
 }
 
 List<String> _stringList(Object? raw) {

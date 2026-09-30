@@ -10,5 +10,4 @@ description = "Sequoia-openpgp backend for scomm-openpgp-core. The only crate th
 scomm-openpgp-core.workspace = true
 sequoia-openpgp = { workspace = true, default-features = false, features = ["crypto-openssl"] }
 anyhow = "1"
-ossl = { version = "1.5.2", default-features = false, features = ["openssl-sys", "rfc9580"] }
 openssl-sys = { version = "0.9.114", features = ["vendored"] }

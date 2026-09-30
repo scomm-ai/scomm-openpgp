@@ -1097,7 +1097,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "openssl-sys",
- "ossl",
  "scomm-openpgp-core",
  "sequoia-openpgp",
 ]

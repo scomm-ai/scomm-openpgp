@@ -177,39 +177,27 @@ typedef _TestPassD = int Function(
   ffi.Pointer<ffi.Uint8>,
   int,
 );
-typedef _PopSignN = ffi.Int32 Function(
+typedef _SignPopN = ffi.Int32 Function(
   ffi.Pointer<ffi.Uint8>,
   ffi.Size,
   ffi.Pointer<ffi.Uint8>,
   ffi.Size,
   ffi.Pointer<ffi.Uint8>,
   ffi.Size,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.Size>,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.Size>,
-);
-typedef _PopSignD = int Function(
   ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.Size>,
+  ffi.Size,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
 );
-typedef _PopHybridN = ffi.Int32 Function(
+typedef _SignPopD = int Function(
   ffi.Pointer<ffi.Uint8>,
-  ffi.Size,
+  int,
   ffi.Pointer<ffi.Uint8>,
-  ffi.Size,
+  int,
   ffi.Pointer<ffi.Uint8>,
-  ffi.Size,
+  int,
   ffi.Pointer<ffi.Uint8>,
-  ffi.Size,
+  int,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
 );
@@ -220,18 +208,6 @@ typedef _Sha256N = ffi.Int32 Function(
   ffi.Pointer<ffi.Size>,
 );
 typedef _Sha256D = int Function(
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.Size>,
-);
-typedef _PopHybridD = int Function(
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Uint8>,
-  int,
   ffi.Pointer<ffi.Uint8>,
   int,
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
@@ -278,11 +254,8 @@ class ScommOpenPgp {
         _testPass = _lib.lookupFunction<_TestPassN, _TestPassD>(
           'scomm_openpgp_test_passphrase',
         ),
-        _popSign = _lib.lookupFunction<_PopSignN, _PopSignD>(
-          'scomm_openpgp_pop_sign_composite',
-        ),
-        _popHybrid = _lib.lookupFunction<_PopHybridN, _PopHybridD>(
-          'scomm_openpgp_pop_hybrid_shared',
+        _signPop = _lib.lookupFunction<_SignPopN, _SignPopD>(
+          'scomm_openpgp_sign_pop',
         ),
         _sha256 = _lib.lookupFunction<_Sha256N, _Sha256D>('scomm_prims_sha256');
 
@@ -382,8 +355,7 @@ class ScommOpenPgp {
   ) _verify;
   final int Function(ffi.Pointer<ffi.Uint8>, int, ffi.Pointer<ffi.Uint8>, int)
       _testPass;
-  final _PopSignD _popSign;
-  final _PopHybridD _popHybrid;
+  final _SignPopD _signPop;
 
   int get abiVersion => _abiVersion();
 
@@ -629,64 +601,29 @@ class ScommOpenPgp {
     });
   }
 
-  CompositePopSignatures popSignComposite({
+  /// Detached OpenPGP signature with a critical notation. Proof of possession.
+  Uint8List signPop({
     required List<int> data,
     required List<int> privateKey,
     String passphrase = '',
+    String notation = 'scomm-pop@scomm.ai',
   }) {
     return using((arena) {
       final d = _copy(arena, data);
       final sk = _copy(arena, privateKey);
       final pass = _copy(arena, utf8.encode(passphrase));
-      final mlPtr = arena<ffi.Pointer<ffi.Uint8>>();
-      final mlLen = arena<ffi.Size>();
-      final edPtr = arena<ffi.Pointer<ffi.Uint8>>();
-      final edLen = arena<ffi.Size>();
-      final code = _popSign(
+      final note = _copy(arena, utf8.encode(notation));
+      final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
+      final outLen = arena<ffi.Size>();
+      final code = _signPop(
         d.ptr,
         d.len,
         sk.ptr,
         sk.len,
         pass.ptr,
         pass.len,
-        mlPtr,
-        mlLen,
-        edPtr,
-        edLen,
-      );
-      if (code != 0) {
-        throw ScommOpenPgpException(code, _readLastError());
-      }
-      return CompositePopSignatures(
-        mldsa: Uint8List.fromList(_take(mlPtr.value, mlLen.value)),
-        ed25519: Uint8List.fromList(_take(edPtr.value, edLen.value)),
-      );
-    });
-  }
-
-  /// Returns `mlkem_shared || x25519_shared` (64 octets). Hash with SHA-256 for AES wrap.
-  Uint8List popHybridShared({
-    required List<int> privateKey,
-    required List<int> kemCiphertext,
-    required List<int> ephemeralX25519,
-    String passphrase = '',
-  }) {
-    return using((arena) {
-      final sk = _copy(arena, privateKey);
-      final pass = _copy(arena, utf8.encode(passphrase));
-      final kem = _copy(arena, kemCiphertext);
-      final eph = _copy(arena, ephemeralX25519);
-      final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
-      final outLen = arena<ffi.Size>();
-      final code = _popHybrid(
-        sk.ptr,
-        sk.len,
-        pass.ptr,
-        pass.len,
-        kem.ptr,
-        kem.len,
-        eph.ptr,
-        eph.len,
+        note.ptr,
+        note.len,
         outPtr,
         outLen,
       );

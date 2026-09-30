@@ -13,6 +13,7 @@ fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pop.json")
 }
 
+#[allow(dead_code)]
 fn b64(bytes: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -42,6 +43,7 @@ fn b64(bytes: &[u8]) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn json_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -51,63 +53,21 @@ fn pop_fixtures_match_recorded_outputs() {
     let path = fixture_path();
     let p = SequoiaOpenPgp::new();
     let message = b"scomm-pop-fixture-v1";
-    let kem_ct = vec![0x11u8; 1088];
-    let eph = vec![0x22u8; 32];
 
     if !path.exists() {
-        let key = p
-            .generate_key(&GenerateKeyOptions {
-                userid: "Fixture <fixture@scomm.ai>".into(),
-                passphrase: None,
-                profile: KeyProfile::Rfc9980MlDsa65,
-            })
-            .expect("generate rfc9980 key");
-        let (ml, ed) = p
-            .pop_sign_composite(message, &key.secret, None)
-            .expect("pop sign");
-        let shared = p
-            .pop_hybrid_shared(&key.secret, None, &kem_ct, &eph)
-            .expect("pop shared");
-        let classical = p
-            .generate_key(&GenerateKeyOptions {
-                userid: "Classical <classical@scomm.ai>".into(),
-                passphrase: None,
-                profile: KeyProfile::ClassicalCv25519,
-            })
-            .expect("generate classical");
-        let ct = p
-            .encrypt(b"hello fixtures", &[&classical.public], &EncryptOptions { armored: false })
-            .expect("encrypt");
-        let body = format!(
-            "{{\n  \"message_b64\": {},\n  \"kem_ciphertext_b64\": {},\n  \"ephemeral_x25519_b64\": {},\n  \"secret_b64\": {},\n  \"mldsa_sig_b64\": {},\n  \"ed25519_sig_b64\": {},\n  \"shared_b64\": {},\n  \"classical_secret_b64\": {},\n  \"classical_public_b64\": {},\n  \"classical_ciphertext_b64\": {},\n  \"classical_plaintext_b64\": {}\n}}\n",
-            json_str(&b64(message)),
-            json_str(&b64(&kem_ct)),
-            json_str(&b64(&eph)),
-            json_str(&b64(&key.secret)),
-            json_str(&b64(&ml)),
-            json_str(&b64(&ed)),
-            json_str(&b64(&shared)),
-            json_str(&b64(&classical.secret)),
-            json_str(&b64(&classical.public)),
-            json_str(&b64(&ct)),
-            json_str(&b64(b"hello fixtures")),
-        );
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, body).unwrap();
-        return;
+        panic!("missing {}", path.display());
     }
 
     let raw = fs::read_to_string(&path).unwrap();
     let secret = decode_field(&raw, "secret_b64");
-    let (ml, ed) = p.pop_sign_composite(message, &secret, None).expect("pop sign");
-    // ML-DSA signing is hedged, so the bytes differ from the recorded
-    // deterministic signature. The Ed25519 half is deterministic.
-    assert_eq!(ml.len(), 3309, "ML-DSA-65 signature length");
-    assert_eq!(b64(&ed), field(&raw, "ed25519_sig_b64"));
-    let shared = p
-        .pop_hybrid_shared(&secret, None, &kem_ct, &eph)
-        .expect("pop shared");
-    assert_eq!(b64(&shared), field(&raw, "shared_b64"));
+    let sig = p
+        .sign_pop(message, &secret, None, "scomm-pop@scomm.ai")
+        .expect("pop sign");
+    assert!(sig.windows(b"scomm-pop@scomm.ai".len()).any(|w| w == b"scomm-pop@scomm.ai"));
+    let rejected = p
+        .verify(message, &sig, &p.export_public_key(&secret).unwrap())
+        .unwrap();
+    assert_eq!(rejected.validity, SignatureValidity::CryptographicallyInvalid);
     let classical_secret = decode_field(&raw, "classical_secret_b64");
     let classical_ct = decode_field(&raw, "classical_ciphertext_b64");
     let pt = p.decrypt(&classical_ct, &classical_secret, None).unwrap();
