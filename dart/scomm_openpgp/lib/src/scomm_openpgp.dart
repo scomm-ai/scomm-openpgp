@@ -254,9 +254,7 @@ class ScommOpenPgp {
         _testPass = _lib.lookupFunction<_TestPassN, _TestPassD>(
           'scomm_openpgp_test_passphrase',
         ),
-        _signPop = _lib.lookupFunction<_SignPopN, _SignPopD>(
-          'scomm_openpgp_sign_pop',
-        ),
+        _signPop = _lookupSignPop(_lib),
         _sha256 = _lib.lookupFunction<_Sha256N, _Sha256D>('scomm_prims_sha256');
 
   static ScommOpenPgp? _instance;
@@ -355,7 +353,14 @@ class ScommOpenPgp {
   ) _verify;
   final int Function(ffi.Pointer<ffi.Uint8>, int, ffi.Pointer<ffi.Uint8>, int)
       _testPass;
-  final _SignPopD _signPop;
+  final _SignPopD? _signPop;
+
+  /// Published desktop libraries predate this export. Mailbox hashing must
+  /// still load when proof-of-possession signing is absent.
+  static _SignPopD? _lookupSignPop(ffi.DynamicLibrary lib) {
+    if (!lib.providesSymbol('scomm_openpgp_sign_pop')) return null;
+    return lib.lookupFunction<_SignPopN, _SignPopD>('scomm_openpgp_sign_pop');
+  }
 
   int get abiVersion => _abiVersion();
 
@@ -608,6 +613,13 @@ class ScommOpenPgp {
     String passphrase = '',
     String notation = 'scomm-pop@scomm.ai',
   }) {
+    final signPop = _signPop;
+    if (signPop == null) {
+      throw ScommOpenPgpException(
+        0,
+        'scomm_openpgp_sign_pop is not in the loaded library',
+      );
+    }
     return using((arena) {
       final d = _copy(arena, data);
       final sk = _copy(arena, privateKey);
@@ -615,7 +627,7 @@ class ScommOpenPgp {
       final note = _copy(arena, utf8.encode(notation));
       final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
       final outLen = arena<ffi.Size>();
-      final code = _signPop(
+      final code = signPop(
         d.ptr,
         d.len,
         sk.ptr,
