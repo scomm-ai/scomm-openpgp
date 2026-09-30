@@ -91,10 +91,13 @@ pub fn is_pqc_signing_catalog(name: &str) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyProfile {
-    /// Ed25519 certification/signing + X25519 encryption (v4). Default.
+    /// Ed25519 certification/signing + X25519 encryption (v4). Interop default
+    /// for clients that cannot read RFC 9580.
     ClassicalCv25519,
     /// RFC 9980 MUST: ML-DSA-65+Ed25519 primary + ML-KEM-768+X25519 subkey (v6).
     Rfc9980MlDsa65,
+    /// RFC 9580 Ed25519 primary + X25519 encryption subkey (v6).
+    Rfc9580Cv25519,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

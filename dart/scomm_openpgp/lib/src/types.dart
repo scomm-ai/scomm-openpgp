@@ -129,7 +129,11 @@ class GeneratedOpenPgpKey {
 /// Generate profile. Matches C ABI `profile` on `scomm_openpgp_generate`.
 enum OpenPgpKeyProfile {
   classicalCv25519(0),
-  rfc9980MlDsa65(1);
+  rfc9980MlDsa65(1),
+
+  /// RFC 9580 Ed25519/X25519. Personal Security default when the native
+  /// library accepts profile id 2.
+  rfc9580Classical(2);
 
   const OpenPgpKeyProfile(this.wire);
   final int wire;

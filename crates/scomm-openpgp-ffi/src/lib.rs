@@ -211,6 +211,7 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
     let profile = match profile {
         0 => KeyProfile::ClassicalCv25519,
         1 => KeyProfile::Rfc9980MlDsa65,
+        2 => KeyProfile::Rfc9580Cv25519,
         _ => {
             set_error("unknown key profile".into());
             return OpenPgpError::InvalidArgument("profile".into()).code();

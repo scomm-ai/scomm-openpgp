@@ -213,3 +213,59 @@ fn rfc9980_generate_encrypt_sign_when_supported() {
     let v = p.verify(b"pqc signed", &sig.bytes, &key.public).unwrap();
     assert_eq!(v.validity, SignatureValidity::CryptographicallyValid);
 }
+
+fn primary_key_version(bytes: &[u8]) -> u8 {
+    assert_eq!(bytes[0] & 0xC0, 0xC0, "expected a new-format packet");
+    let mut i = 1usize;
+    let len = bytes[i];
+    i += 1;
+    if len < 192 {
+    } else if len < 224 {
+        i += 1;
+    } else if len == 255 {
+        i += 4;
+    } else {
+        panic!("partial body length");
+    }
+    bytes[i]
+}
+
+#[test]
+fn rfc9580_classical_roundtrip_and_v4_still_decrypts() {
+    let p = pgp();
+    let v6 = p
+        .generate_key(&GenerateKeyOptions {
+            userid: "Ada <ada@example.com>".into(),
+            passphrase: None,
+            profile: KeyProfile::Rfc9580Cv25519,
+        })
+        .expect("v6 generate");
+    assert_eq!(primary_key_version(&v6.public), 6);
+    assert!(!v6.info.is_pqc());
+
+    let ct = p
+        .encrypt(b"v6 hello", &[&v6.public], &EncryptOptions::default())
+        .unwrap();
+    let pt = p.decrypt(&ct, &v6.secret, None).unwrap();
+    assert_eq!(pt.plaintext, b"v6 hello");
+
+    let v4 = gen("Legacy <legacy@example.com>");
+    assert_eq!(primary_key_version(&v4.public), 4);
+    let legacy = p
+        .encrypt(b"v4 hello", &[&v4.public], &EncryptOptions::default())
+        .unwrap();
+    assert_eq!(
+        p.decrypt(&legacy, &v4.secret, None).unwrap().plaintext,
+        b"v4 hello"
+    );
+
+    let mixed = p
+        .encrypt(
+            b"mixed",
+            &[&v6.public, &v4.public],
+            &EncryptOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(p.decrypt(&mixed, &v6.secret, None).unwrap().plaintext, b"mixed");
+    assert_eq!(p.decrypt(&mixed, &v4.secret, None).unwrap().plaintext, b"mixed");
+}

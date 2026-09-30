@@ -62,6 +62,10 @@ impl OpenPgpProvider for SequoiaOpenPgp {
         let mut builder = CertBuilder::general_purpose(Some(options.userid.as_str()));
         builder = match options.profile {
             KeyProfile::ClassicalCv25519 => builder.set_cipher_suite(CipherSuite::Cv25519),
+            KeyProfile::Rfc9580Cv25519 => builder
+                .set_profile(Profile::RFC9580)
+                .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
+                .set_cipher_suite(CipherSuite::Cv25519),
             KeyProfile::Rfc9980MlDsa65 => builder
                 .set_profile(Profile::RFC9580)
                 .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
