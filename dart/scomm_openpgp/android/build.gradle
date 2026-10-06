@@ -1,0 +1,62 @@
+group 'ai.scomm.scomm_openpgp'
+version '1.0'
+
+apply plugin: 'com.android.library'
+
+// Flutter may point projectDir at .plugin_symlinks. canonicalFile resolves
+// that before walking up to the repo-root prebuilt/ tree, same as the
+// desktop CMakeLists.
+def repoRoot = new File(project.projectDir, '../../..').canonicalFile
+def jniOut = new File(project.buildDir, 'generated/jniLibs')
+def abiTriples = [
+    'arm64-v8a'  : 'aarch64-linux-android',
+    'armeabi-v7a': 'armv7-linux-androideabi',
+    'x86_64'     : 'x86_64-linux-android',
+    'x86'        : 'i686-linux-android',
+]
+
+def openPgpJniSources = abiTriples.collect { abi, triple ->
+    def src = new File(repoRoot, "prebuilt/${triple}/libscomm_openpgp.so")
+    if (!src.isFile()) {
+        throw new GradleException("scomm_openpgp: missing ${src}")
+    }
+    [abi, src]
+}
+
+android {
+    namespace 'ai.scomm.scomm_openpgp'
+    compileSdk 36
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        minSdk 24
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = [jniOut]
+        }
+    }
+}
+
+tasks.register('copyOpenPgpJniLibs', Copy) {
+    into jniOut
+    openPgpJniSources.each { pair ->
+        def abi = pair[0]
+        def src = pair[1]
+        from(src) {
+            into abi
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name == 'preBuild' ||
+            (task.name.startsWith('merge') && task.name.endsWith('JniLibFolders'))) {
+        task.dependsOn 'copyOpenPgpJniLibs'
+    }
+}
