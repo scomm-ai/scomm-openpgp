@@ -310,6 +310,22 @@ Uint8List nativePkcs8Decrypt(List<int> encryptedDer, List<int> passphrase) =>
       );
     });
 
+/// SubjectPublicKeyInfo DER of a PKCS#8 private key.
+Uint8List nativePkcs8PublicSpki(List<int> pkcs8Der) =>
+    _out('scomm_prims_pkcs8_public_spki', (arena, out, outLen) {
+      final k = _bytes(arena, pkcs8Der);
+      return _lib.lookupFunction<
+          Int32 Function(Pointer<Uint8>, Size, Pointer<Pointer<Uint8>>,
+              Pointer<Size>),
+          int Function(Pointer<Uint8>, int, Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_pkcs8_public_spki')(
+        k.$1,
+        k.$2,
+        out,
+        outLen,
+      );
+    });
+
 /// PKCS#10 CertificationRequest DER. [subject] is `CN=..,O=..`.
 Uint8List nativeCsrCreate(List<int> pkcs8Der, String subject) =>
     _out('scomm_prims_csr_create', (arena, out, outLen) {

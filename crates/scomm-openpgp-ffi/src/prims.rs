@@ -247,6 +247,14 @@ pub fn ec_p256_from_scalar(d: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
     key_der(&PKey::from_ec_key(ec).map_err(|e| e.to_string())?)
 }
 
+/// SubjectPublicKeyInfo DER of a PKCS#8 private key.
+pub fn pkcs8_public_spki(pkcs8: &[u8]) -> Result<Vec<u8>, String> {
+    init();
+    PKey::private_key_from_der(pkcs8)
+        .and_then(|key| key.public_key_to_der())
+        .map_err(|e| e.to_string())
+}
+
 /// Schemes: 1 ECDSA-SHA256 (ASN.1 DER), 2 RSASSA-PKCS1-v1_5-SHA256, 3 Ed25519.
 pub fn pkey_sign(scheme: i32, pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
     init();

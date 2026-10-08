@@ -114,6 +114,8 @@ int32_t scomm_prims_pkcs8_encrypt(const uint8_t *pkcs8, size_t pkcs8_len,
     uint8_t **out, size_t *out_len);
 int32_t scomm_prims_pkcs8_decrypt(const uint8_t *encrypted, size_t encrypted_len,
     const uint8_t *passphrase, size_t passphrase_len, uint8_t **out, size_t *out_len);
+int32_t scomm_prims_pkcs8_public_spki(const uint8_t *pkcs8, size_t pkcs8_len,
+    uint8_t **out, size_t *out_len);
 int32_t scomm_prims_csr_create(const uint8_t *pkcs8, size_t pkcs8_len,
     const uint8_t *subject, size_t subject_len, uint8_t **out, size_t *out_len);
 

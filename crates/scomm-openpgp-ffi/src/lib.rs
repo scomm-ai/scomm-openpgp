@@ -1050,3 +1050,13 @@ pub unsafe extern "C" fn scomm_prims_csr_create(
         out_len,
     )
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pkcs8_public_spki(
+    pkcs8: *const u8,
+    pkcs8_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(prims::pkcs8_public_spki(read_slice(pkcs8, pkcs8_len)), out, out_len)
+}
