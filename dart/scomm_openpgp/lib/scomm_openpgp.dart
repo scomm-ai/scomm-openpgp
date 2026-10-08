@@ -14,5 +14,6 @@ export 'src/prims_native.dart'
         nativeSha512,
         nativeX25519Dh,
         nativeX25519Public;
+export 'src/prims_more.dart';
 export 'src/scomm_openpgp.dart';
 export 'src/types.dart';

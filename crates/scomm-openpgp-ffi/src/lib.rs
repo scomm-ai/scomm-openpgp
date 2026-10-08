@@ -748,3 +748,178 @@ pub unsafe extern "C" fn scomm_prims_msk_sign(
         out_len,
     )
 }
+
+fn prim_bool(result: std::result::Result<bool, String>) -> i32 {
+    match result {
+        Ok(v) => {
+            clear_error();
+            v as i32
+        }
+        Err(err) => {
+            set_error(err);
+            -1
+        }
+    }
+}
+
+/// `alg`: 1 MD5, 2 SHA-1, 3 SHA-256, 4 SHA-384, 5 SHA-512.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_digest(
+    alg: i32,
+    data: *const u8,
+    data_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(prims::digest(alg, read_slice(data, data_len)), out, out_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_hmac(
+    alg: i32,
+    key: *const u8,
+    key_len: usize,
+    data: *const u8,
+    data_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::hmac(alg, read_slice(key, key_len), read_slice(data, data_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pbkdf2(
+    alg: i32,
+    password: *const u8,
+    password_len: usize,
+    salt: *const u8,
+    salt_len: usize,
+    iterations: usize,
+    key_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::pbkdf2(
+            alg,
+            read_slice(password, password_len),
+            read_slice(salt, salt_len),
+            iterations,
+            key_len,
+        ),
+        out,
+        out_len,
+    )
+}
+
+/// RSASSA-PKCS1-v1_5 over a PKCS#8 (or PKCS#1) DER private key.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_rsa_pkcs1_sign(
+    alg: i32,
+    private_key_der: *const u8,
+    private_key_len: usize,
+    message: *const u8,
+    message_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::rsa_pkcs1_sign(
+            alg,
+            read_slice(private_key_der, private_key_len),
+            read_slice(message, message_len),
+        ),
+        out,
+        out_len,
+    )
+}
+
+/// Returns 1 valid, 0 invalid signature, -1 error (bad key or algorithm).
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_rsa_pkcs1_verify(
+    alg: i32,
+    spki_der: *const u8,
+    spki_len: usize,
+    message: *const u8,
+    message_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> i32 {
+    prim_bool(prims::rsa_pkcs1_verify(
+        alg,
+        read_slice(spki_der, spki_len),
+        read_slice(message, message_len),
+        read_slice(signature, signature_len),
+    ))
+}
+
+/// ECDSA verify. `raw` != 0 means a JWS `r || s` signature, else ASN.1 DER.
+/// Returns 1 valid, 0 invalid signature, -1 error.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_ecdsa_verify(
+    alg: i32,
+    spki_der: *const u8,
+    spki_len: usize,
+    message: *const u8,
+    message_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+    raw: i32,
+) -> i32 {
+    prim_bool(prims::ecdsa_verify(
+        alg,
+        read_slice(spki_der, spki_len),
+        read_slice(message, message_len),
+        read_slice(signature, signature_len),
+        raw != 0,
+    ))
+}
+
+/// AES-CBC with PKCS#7 padding; the key length (16, 24, 32) selects the cipher.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_aes_cbc_encrypt(
+    key: *const u8,
+    key_len: usize,
+    iv: *const u8,
+    iv_len: usize,
+    plaintext: *const u8,
+    plaintext_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::aes_cbc_encrypt(
+            read_slice(key, key_len),
+            read_slice(iv, iv_len),
+            read_slice(plaintext, plaintext_len),
+        ),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_aes_cbc_decrypt(
+    key: *const u8,
+    key_len: usize,
+    iv: *const u8,
+    iv_len: usize,
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::aes_cbc_decrypt(
+            read_slice(key, key_len),
+            read_slice(iv, iv_len),
+            read_slice(ciphertext, ciphertext_len),
+        ),
+        out,
+        out_len,
+    )
+}

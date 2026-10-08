@@ -4,6 +4,8 @@
 use openssl::hash::{hash, MessageDigest};
 use openssl::kdf::argon2id;
 use openssl::pkcs5::pbkdf2_hmac;
+use openssl::bn::BigNum;
+use openssl::ecdsa::EcdsaSig;
 use openssl::pkey::PKey;
 use openssl::rand::rand_bytes;
 use openssl::sign::{Signer, Verifier};
@@ -76,6 +78,127 @@ pub fn argon2id_derive(
     argon2id(None, password, salt, None, None, iterations, lanes, mem_kib, &mut out)
         .map_err(|e| e.to_string())?;
     Ok(out)
+}
+
+/// Digest ids shared with the C ABI: 1 MD5, 2 SHA-1, 3 SHA-256, 4 SHA-384, 5 SHA-512.
+fn digest_by_id(id: i32) -> Result<MessageDigest, String> {
+    init();
+    match id {
+        1 => Ok(MessageDigest::md5()),
+        2 => Ok(MessageDigest::sha1()),
+        3 => Ok(MessageDigest::sha256()),
+        4 => Ok(MessageDigest::sha384()),
+        5 => Ok(MessageDigest::sha512()),
+        _ => Err("digest id".into()),
+    }
+}
+
+pub fn digest(id: i32, data: &[u8]) -> Result<Vec<u8>, String> {
+    hash(digest_by_id(id)?, data)
+        .map(|d| d.to_vec())
+        .map_err(|e| e.to_string())
+}
+
+pub fn hmac(id: i32, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    let md = digest_by_id(id)?;
+    let pkey = PKey::hmac(key).map_err(|e| e.to_string())?;
+    let mut signer = Signer::new(md, &pkey).map_err(|e| e.to_string())?;
+    signer.update(data).map_err(|e| e.to_string())?;
+    signer.sign_to_vec().map_err(|e| e.to_string())
+}
+
+pub fn pbkdf2(
+    id: i32,
+    password: &[u8],
+    salt: &[u8],
+    iterations: usize,
+    out_len: usize,
+) -> Result<Vec<u8>, String> {
+    let md = digest_by_id(id)?;
+    let mut out = vec![0u8; out_len];
+    pbkdf2_hmac(password, salt, iterations, md, &mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// RSASSA-PKCS1-v1_5. `pkcs8` is a PKCS#8 (or PKCS#1) DER private key.
+pub fn rsa_pkcs1_sign(id: i32, pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+    let md = digest_by_id(id)?;
+    let key = PKey::private_key_from_der(pkcs8).map_err(|e| e.to_string())?;
+    if key.id() != openssl::pkey::Id::RSA {
+        return Err("rsa key".into());
+    }
+    let mut signer = Signer::new(md, &key).map_err(|e| e.to_string())?;
+    signer.update(message).map_err(|e| e.to_string())?;
+    signer.sign_to_vec().map_err(|e| e.to_string())
+}
+
+/// `spki` is a SubjectPublicKeyInfo DER. A bad signature is `Ok(false)`.
+pub fn rsa_pkcs1_verify(
+    id: i32,
+    spki: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<bool, String> {
+    let md = digest_by_id(id)?;
+    let key = PKey::public_key_from_der(spki).map_err(|e| e.to_string())?;
+    if key.id() != openssl::pkey::Id::RSA {
+        return Err("rsa key".into());
+    }
+    let mut verifier = Verifier::new(md, &key).map_err(|e| e.to_string())?;
+    verifier.update(message).map_err(|e| e.to_string())?;
+    Ok(verifier.verify(signature).unwrap_or(false))
+}
+
+/// ECDSA over a SubjectPublicKeyInfo DER key. `raw` signatures are the JWS
+/// `r || s` form (equal halves); otherwise ASN.1 DER.
+pub fn ecdsa_verify(
+    id: i32,
+    spki: &[u8],
+    message: &[u8],
+    signature: &[u8],
+    raw: bool,
+) -> Result<bool, String> {
+    let md = digest_by_id(id)?;
+    let key = PKey::public_key_from_der(spki).map_err(|e| e.to_string())?;
+    if key.id() != openssl::pkey::Id::EC {
+        return Err("ec key".into());
+    }
+    let der = if raw {
+        if signature.is_empty() || signature.len() % 2 != 0 {
+            return Ok(false);
+        }
+        let half = signature.len() / 2;
+        let r = BigNum::from_slice(&signature[..half]).map_err(|e| e.to_string())?;
+        let s = BigNum::from_slice(&signature[half..]).map_err(|e| e.to_string())?;
+        EcdsaSig::from_private_components(r, s)
+            .and_then(|sig| sig.to_der())
+            .map_err(|e| e.to_string())?
+    } else {
+        signature.to_vec()
+    };
+    let mut verifier = Verifier::new(md, &key).map_err(|e| e.to_string())?;
+    verifier.update(message).map_err(|e| e.to_string())?;
+    Ok(verifier.verify(&der).unwrap_or(false))
+}
+
+fn aes_cbc_cipher(key: &[u8]) -> Result<Cipher, String> {
+    match key.len() {
+        16 => Ok(Cipher::aes_128_cbc()),
+        24 => Ok(Cipher::aes_192_cbc()),
+        32 => Ok(Cipher::aes_256_cbc()),
+        _ => Err("aes key".into()),
+    }
+}
+
+/// AES-CBC with PKCS#7 padding.
+pub fn aes_cbc_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    openssl::symm::encrypt(aes_cbc_cipher(key)?, key, Some(iv), plaintext)
+        .map_err(|e| e.to_string())
+}
+
+pub fn aes_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+    openssl::symm::decrypt(aes_cbc_cipher(key)?, key, Some(iv), ciphertext)
+        .map_err(|_| "aes-cbc".to_string())
 }
 
 pub fn random(n: usize) -> Result<Vec<u8>, String> {
@@ -290,6 +413,69 @@ mod tests {
         let ak = argon2id_derive(b"pw", b"saltsalt", 1, 1, 8192, 32).unwrap();
         assert_eq!(ak.len(), 32);
         assert_eq!(random(16).unwrap().len(), 16);
+    }
+
+    #[test]
+    fn digests_and_hmac() {
+        assert_eq!(
+            hex::encode_simple(&digest(2, b"abc").unwrap()),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(
+            hex::encode_simple(&digest(1, b"abc").unwrap()),
+            "900150983cd24fb0d6963f7d28e17f72"
+        );
+        // RFC 4231 test case 2
+        assert_eq!(
+            hex::encode_simple(&hmac(3, b"Jefe", b"what do ya want for nothing?").unwrap()),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(
+            hex::encode_simple(&pbkdf2(2, b"password", b"salt", 2, 20).unwrap()),
+            "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957"
+        );
+    }
+
+    #[test]
+    fn rsa_pkcs1_roundtrip() {
+        let rsa = openssl::rsa::Rsa::generate(2048).unwrap();
+        let key = PKey::from_rsa(rsa).unwrap();
+        let pkcs8 = key.private_key_to_pkcs8().unwrap();
+        let spki = key.public_key_to_der().unwrap();
+        let sig = rsa_pkcs1_sign(3, &pkcs8, b"attrs").unwrap();
+        assert_eq!(sig.len(), 256);
+        assert!(rsa_pkcs1_verify(3, &spki, b"attrs", &sig).unwrap());
+        assert!(!rsa_pkcs1_verify(3, &spki, b"other", &sig).unwrap());
+        let mut bad = sig.clone();
+        bad[0] ^= 1;
+        assert!(!rsa_pkcs1_verify(3, &spki, b"attrs", &bad).unwrap());
+    }
+
+    #[test]
+    fn ecdsa_p256_raw_and_der() {
+        use openssl::ec::{EcGroup, EcKey};
+        use openssl::nid::Nid;
+        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
+        let ec = EcKey::generate(&group).unwrap();
+        let key = PKey::from_ec_key(ec.clone()).unwrap();
+        let spki = key.public_key_to_der().unwrap();
+        let sig = EcdsaSig::sign(&openssl::hash::hash(MessageDigest::sha256(), b"jwt").unwrap(), &ec)
+            .unwrap();
+        let der = sig.to_der().unwrap();
+        assert!(ecdsa_verify(3, &spki, b"jwt", &der, false).unwrap());
+        let mut raw = sig.r().to_vec_padded(32).unwrap();
+        raw.extend(sig.s().to_vec_padded(32).unwrap());
+        assert!(ecdsa_verify(3, &spki, b"jwt", &raw, true).unwrap());
+        assert!(!ecdsa_verify(3, &spki, b"nope", &raw, true).unwrap());
+    }
+
+    #[test]
+    fn aes_cbc_roundtrip() {
+        let key = [1u8; 32];
+        let iv = [2u8; 16];
+        let ct = aes_cbc_encrypt(&key, &iv, b"hello").unwrap();
+        assert_eq!(ct.len(), 16);
+        assert_eq!(aes_cbc_decrypt(&key, &iv, &ct).unwrap(), b"hello");
     }
 
     #[test]
