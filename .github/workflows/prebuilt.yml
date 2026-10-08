@@ -223,8 +223,88 @@ jobs:
           path: target/${{ matrix.target }}/release/libscomm_openpgp.dylib
           if-no-files-found: error
 
+  package-ios-xcframework:
+    name: ios xcframework
+    needs: [select, ios]
+    if: needs.select.outputs.ios != '[]'
+    runs-on: macos-latest
+    steps:
+      - name: Download iOS dylibs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-apple-ios*"
+          path: ios-dylibs
+      - name: Wrap device and simulator slices
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/openpgp-xcframework"
+          rm -rf "$work"
+          mkdir -p "$work/ios-arm64" "$work/ios-arm64_x86_64-simulator" "$work/sim"
+
+          make_framework() {
+            local src="$1"
+            local dest_parent="$2"
+            local platform="$3"
+            local fw="$dest_parent/libscomm_openpgp.framework"
+            rm -rf "$fw"
+            mkdir -p "$fw"
+            cp "$src" "$fw/libscomm_openpgp"
+            chmod +x "$fw/libscomm_openpgp"
+            install_name_tool -id "@rpath/libscomm_openpgp.framework/libscomm_openpgp" "$fw/libscomm_openpgp"
+            python3 -c 'import pathlib,sys; p,plat=sys.argv[1],sys.argv[2]; pathlib.Path(p).write_text("""<?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleExecutable</key>
+              <string>libscomm_openpgp</string>
+              <key>CFBundleIdentifier</key>
+              <string>ai.scomm.openpgp</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>libscomm_openpgp</string>
+              <key>CFBundlePackageType</key>
+              <string>FMWK</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>MinimumOSVersion</key>
+              <string>14.0</string>
+              <key>CFBundleSupportedPlatforms</key>
+              <array>
+                <string>%s</string>
+              </array>
+            </dict>
+            </plist>
+            """ % plat)' "$fw/Info.plist" "$platform"
+            codesign --force --sign - --timestamp=none "$fw"
+          }
+
+          device="ios-dylibs/aarch64-apple-ios/libscomm_openpgp.dylib"
+          sim_arm="ios-dylibs/aarch64-apple-ios-sim/libscomm_openpgp.dylib"
+          sim_x64="ios-dylibs/x86_64-apple-ios/libscomm_openpgp.dylib"
+          test -f "$device"
+          test -f "$sim_arm"
+          test -f "$sim_x64"
+          lipo -create "$sim_arm" "$sim_x64" -output "$work/sim/libscomm_openpgp.dylib"
+          make_framework "$device" "$work/ios-arm64" "iPhoneOS"
+          make_framework "$work/sim/libscomm_openpgp.dylib" "$work/ios-arm64_x86_64-simulator" "iPhoneSimulator"
+          xcodebuild -create-xcframework \
+            -framework "$work/ios-arm64/libscomm_openpgp.framework" \
+            -framework "$work/ios-arm64_x86_64-simulator/libscomm_openpgp.framework" \
+            -output "$work/libscomm_openpgp.xcframework"
+          cp -R "$work/libscomm_openpgp.xcframework" "$RUNNER_TEMP/libscomm_openpgp.xcframework"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework
+          path: ${{ runner.temp }}/libscomm_openpgp.xcframework
+          if-no-files-found: error
+
   publish:
-    needs: [desktop, android, ios]
+    needs: [desktop, android, ios, package-ios-xcframework]
     if: >-
       always() && !cancelled() &&
       !contains(needs.*.result, 'failure') &&
@@ -261,9 +341,27 @@ jobs:
           done
       - name: Commit libraries
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          framework_dest="dart/scomm_openpgp/ios/Frameworks/libscomm_openpgp.xcframework"
+          if [ -d prebuilt/ios-xcframework/libscomm_openpgp.xcframework ]; then
+            rm -rf "$framework_dest"
+            mkdir -p dart/scomm_openpgp/ios/Frameworks
+            mv prebuilt/ios-xcframework/libscomm_openpgp.xcframework "$framework_dest"
+            rm -rf prebuilt/ios-xcframework
+          elif [ -d prebuilt/ios-xcframework/ios-arm64 ] || [ -f prebuilt/ios-xcframework/Info.plist ]; then
+            rm -rf "$framework_dest"
+            mkdir -p dart/scomm_openpgp/ios/Frameworks
+            mv prebuilt/ios-xcframework "$framework_dest"
+          fi
+          if [ -d "$framework_dest" ]; then
+            rm -rf prebuilt/aarch64-apple-ios prebuilt/aarch64-apple-ios-sim prebuilt/x86_64-apple-ios
+          fi
           git add prebuilt
+          if [ -d dart/scomm_openpgp/ios/Frameworks ]; then
+            git add dart/scomm_openpgp/ios/Frameworks
+          fi
           if git diff --cached --quiet; then
             echo "Prebuilt libraries are unchanged."
             exit 0

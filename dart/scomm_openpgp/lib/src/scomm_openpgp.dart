@@ -750,7 +750,12 @@ class ScommOpenPgp {
     if (Platform.isLinux) {
       return ffi.DynamicLibrary.open('libscomm_openpgp.so');
     }
-    if (Platform.isMacOS || Platform.isIOS) {
+    if (Platform.isIOS) {
+      return ffi.DynamicLibrary.open(
+        'libscomm_openpgp.framework/libscomm_openpgp',
+      );
+    }
+    if (Platform.isMacOS) {
       return ffi.DynamicLibrary.open('libscomm_openpgp.dylib');
     }
     if (Platform.isAndroid) {

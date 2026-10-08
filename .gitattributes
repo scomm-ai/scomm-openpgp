@@ -1,1 +1,2 @@
 prebuilt/** -text linguist-generated
+dart/scomm_openpgp/ios/Frameworks/** -text linguist-generated
