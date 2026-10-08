@@ -923,3 +923,130 @@ pub unsafe extern "C" fn scomm_prims_aes_cbc_decrypt(
         out_len,
     )
 }
+
+unsafe fn write_pair(
+    pair: std::result::Result<(Vec<u8>, Vec<u8>), String>,
+    a_out: *mut *mut u8,
+    a_len: *mut usize,
+    b_out: *mut *mut u8,
+    b_len: *mut usize,
+) -> i32 {
+    match pair {
+        Ok((a, b)) => {
+            clear_error();
+            write_buf(&a, a_out, a_len);
+            write_buf(&b, b_out, b_len);
+            0
+        }
+        Err(err) => {
+            set_error(err);
+            -1
+        }
+    }
+}
+
+/// `kind`: 1 EC P-256, 2 RSA-2048, 3 RSA-3072, 4 Ed25519. Outputs a PKCS#8
+/// PrivateKeyInfo DER and a SubjectPublicKeyInfo DER.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pkey_generate(
+    kind: i32,
+    pkcs8_out: *mut *mut u8,
+    pkcs8_len: *mut usize,
+    spki_out: *mut *mut u8,
+    spki_len: *mut usize,
+) -> i32 {
+    write_pair(prims::pkey_generate(kind), pkcs8_out, pkcs8_len, spki_out, spki_len)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_ec_p256_from_scalar(
+    scalar: *const u8,
+    scalar_len: usize,
+    pkcs8_out: *mut *mut u8,
+    pkcs8_len: *mut usize,
+    spki_out: *mut *mut u8,
+    spki_len: *mut usize,
+) -> i32 {
+    write_pair(
+        prims::ec_p256_from_scalar(read_slice(scalar, scalar_len)),
+        pkcs8_out,
+        pkcs8_len,
+        spki_out,
+        spki_len,
+    )
+}
+
+/// `scheme`: 1 ECDSA-SHA256 (DER), 2 RSASSA-PKCS1-v1_5-SHA256, 3 Ed25519.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pkey_sign(
+    scheme: i32,
+    pkcs8: *const u8,
+    pkcs8_len: usize,
+    message: *const u8,
+    message_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::pkey_sign(scheme, read_slice(pkcs8, pkcs8_len), read_slice(message, message_len)),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pkcs8_encrypt(
+    pkcs8: *const u8,
+    pkcs8_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    iterations: u32,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::pkcs8_encrypt(
+            read_slice(pkcs8, pkcs8_len),
+            read_slice(passphrase, passphrase_len),
+            iterations,
+        ),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_pkcs8_decrypt(
+    encrypted: *const u8,
+    encrypted_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    prim_out(
+        prims::pkcs8_decrypt(
+            read_slice(encrypted, encrypted_len),
+            read_slice(passphrase, passphrase_len),
+        ),
+        out,
+        out_len,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_csr_create(
+    pkcs8: *const u8,
+    pkcs8_len: usize,
+    subject: *const u8,
+    subject_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let subject = String::from_utf8_lossy(read_slice(subject, subject_len)).into_owned();
+    prim_out(
+        prims::csr_create(read_slice(pkcs8, pkcs8_len), &subject),
+        out,
+        out_len,
+    )
+}

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
 
@@ -182,6 +183,174 @@ Uint8List _aesCbc(String symbol, List<int> key, List<int> iv, List<int> data) =>
               Pointer<Uint8>, int, Pointer<Pointer<Uint8>>,
               Pointer<Size>)>(symbol)(k.$1, k.$2, v.$1, v.$2, d.$1, d.$2, out, outLen);
     });
+
+/// Key kinds of [nativePkeyGenerate].
+enum NativeKeyKind {
+  ecP256(1),
+  rsa2048(2),
+  rsa3072(3),
+  ed25519(4);
+
+  const NativeKeyKind(this.id);
+  final int id;
+}
+
+/// Signature schemes of [nativePkeySign].
+enum NativeSignScheme {
+  /// ECDSA with SHA-256, ASN.1 DER signature.
+  ecdsaSha256(1),
+
+  /// RSASSA-PKCS1-v1_5 with SHA-256.
+  rsaPkcs1Sha256(2),
+  ed25519(3);
+
+  const NativeSignScheme(this.id);
+  final int id;
+}
+
+/// A private key as PKCS#8 PrivateKeyInfo DER plus its SubjectPublicKeyInfo DER.
+typedef NativeKeyPair = ({Uint8List pkcs8Der, Uint8List spkiDer});
+
+NativeKeyPair nativePkeyGenerate(NativeKeyKind kind) =>
+    _pair('scomm_prims_pkey_generate', (arena, a, aLen, b, bLen) {
+      return _lib.lookupFunction<
+          Int32 Function(Int32, Pointer<Pointer<Uint8>>, Pointer<Size>,
+              Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(int, Pointer<Pointer<Uint8>>, Pointer<Size>,
+              Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_pkey_generate')(kind.id, a, aLen, b, bLen);
+    });
+
+/// EC P-256 key pair from a 32-byte private scalar.
+NativeKeyPair nativeEcP256FromScalar(List<int> scalar) =>
+    _pair('scomm_prims_ec_p256_from_scalar', (arena, a, aLen, b, bLen) {
+      final s = _bytes(arena, scalar);
+      return _lib.lookupFunction<
+          Int32 Function(Pointer<Uint8>, Size, Pointer<Pointer<Uint8>>,
+              Pointer<Size>, Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(Pointer<Uint8>, int, Pointer<Pointer<Uint8>>,
+              Pointer<Size>, Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_ec_p256_from_scalar')(
+        s.$1,
+        s.$2,
+        a,
+        aLen,
+        b,
+        bLen,
+      );
+    });
+
+Uint8List nativePkeySign(
+  NativeSignScheme scheme,
+  List<int> pkcs8Der,
+  List<int> message,
+) =>
+    _out('scomm_prims_pkey_sign', (arena, out, outLen) {
+      final k = _bytes(arena, pkcs8Der);
+      final m = _bytes(arena, message);
+      return _lib.lookupFunction<
+          Int32 Function(Int32, Pointer<Uint8>, Size, Pointer<Uint8>, Size,
+              Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(int, Pointer<Uint8>, int, Pointer<Uint8>, int,
+              Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_pkey_sign')(
+        scheme.id,
+        k.$1,
+        k.$2,
+        m.$1,
+        m.$2,
+        out,
+        outLen,
+      );
+    });
+
+/// PKCS#8 PrivateKeyInfo to EncryptedPrivateKeyInfo (PBES2, PBKDF2-HMAC-SHA256,
+/// AES-256-CBC).
+Uint8List nativePkcs8Encrypt(
+  List<int> pkcs8Der,
+  List<int> passphrase, {
+  required int iterations,
+}) =>
+    _out('scomm_prims_pkcs8_encrypt', (arena, out, outLen) {
+      final k = _bytes(arena, pkcs8Der);
+      final p = _bytes(arena, passphrase);
+      return _lib.lookupFunction<
+          Int32 Function(Pointer<Uint8>, Size, Pointer<Uint8>, Size, Uint32,
+              Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(Pointer<Uint8>, int, Pointer<Uint8>, int, int,
+              Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_pkcs8_encrypt')(
+        k.$1,
+        k.$2,
+        p.$1,
+        p.$2,
+        iterations,
+        out,
+        outLen,
+      );
+    });
+
+/// Throws [StateError] for a wrong passphrase or an unreadable key.
+Uint8List nativePkcs8Decrypt(List<int> encryptedDer, List<int> passphrase) =>
+    _out('scomm_prims_pkcs8_decrypt', (arena, out, outLen) {
+      final e = _bytes(arena, encryptedDer);
+      final p = _bytes(arena, passphrase);
+      return _lib.lookupFunction<
+          Int32 Function(Pointer<Uint8>, Size, Pointer<Uint8>, Size,
+              Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(Pointer<Uint8>, int, Pointer<Uint8>, int,
+              Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_pkcs8_decrypt')(
+        e.$1,
+        e.$2,
+        p.$1,
+        p.$2,
+        out,
+        outLen,
+      );
+    });
+
+/// PKCS#10 CertificationRequest DER. [subject] is `CN=..,O=..`.
+Uint8List nativeCsrCreate(List<int> pkcs8Der, String subject) =>
+    _out('scomm_prims_csr_create', (arena, out, outLen) {
+      final k = _bytes(arena, pkcs8Der);
+      final s = _bytes(arena, utf8.encode(subject));
+      return _lib.lookupFunction<
+          Int32 Function(Pointer<Uint8>, Size, Pointer<Uint8>, Size,
+              Pointer<Pointer<Uint8>>, Pointer<Size>),
+          int Function(Pointer<Uint8>, int, Pointer<Uint8>, int,
+              Pointer<Pointer<Uint8>>,
+              Pointer<Size>)>('scomm_prims_csr_create')(
+        k.$1,
+        k.$2,
+        s.$1,
+        s.$2,
+        out,
+        outLen,
+      );
+    });
+
+NativeKeyPair _pair(
+  String symbol,
+  int Function(Arena, Pointer<Pointer<Uint8>>, Pointer<Size>,
+          Pointer<Pointer<Uint8>>, Pointer<Size>)
+      body,
+) =>
+    using((arena) {
+      final a = arena<Pointer<Uint8>>();
+      final aLen = arena<Size>();
+      final b = arena<Pointer<Uint8>>();
+      final bLen = arena<Size>();
+      if (body(arena, a, aLen, b, bLen) != 0) throw StateError(symbol);
+      return (pkcs8Der: _take(a.value, aLen.value), spkiDer: _take(b.value, bLen.value));
+    });
+
+Uint8List _take(Pointer<Uint8> ptr, int len) {
+  final bytes = Uint8List.fromList(ptr.asTypedList(len));
+  _lib.lookupFunction<Void Function(Pointer<Uint8>, Size),
+      void Function(Pointer<Uint8>, int)>('scomm_openpgp_buffer_free')(ptr, len);
+  return bytes;
+}
 
 // The library is a plugin opened with DynamicLibrary.open, so symbols are
 // looked up on that handle rather than through @Native.

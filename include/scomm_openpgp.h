@@ -100,6 +100,23 @@ int32_t scomm_prims_aes_cbc_decrypt(const uint8_t *key, size_t key_len,
     const uint8_t *iv, size_t iv_len, const uint8_t *ciphertext, size_t ciphertext_len,
     uint8_t **out, size_t *out_len);
 
+/* Keys. kind: 1 EC P-256, 2 RSA-2048, 3 RSA-3072, 4 Ed25519.
+ * scheme: 1 ECDSA-SHA256 (DER), 2 RSASSA-PKCS1-v1_5-SHA256, 3 Ed25519. */
+int32_t scomm_prims_pkey_generate(int32_t kind,
+    uint8_t **pkcs8_out, size_t *pkcs8_len, uint8_t **spki_out, size_t *spki_len);
+int32_t scomm_prims_ec_p256_from_scalar(const uint8_t *scalar, size_t scalar_len,
+    uint8_t **pkcs8_out, size_t *pkcs8_len, uint8_t **spki_out, size_t *spki_len);
+int32_t scomm_prims_pkey_sign(int32_t scheme,
+    const uint8_t *pkcs8, size_t pkcs8_len,
+    const uint8_t *message, size_t message_len, uint8_t **out, size_t *out_len);
+int32_t scomm_prims_pkcs8_encrypt(const uint8_t *pkcs8, size_t pkcs8_len,
+    const uint8_t *passphrase, size_t passphrase_len, uint32_t iterations,
+    uint8_t **out, size_t *out_len);
+int32_t scomm_prims_pkcs8_decrypt(const uint8_t *encrypted, size_t encrypted_len,
+    const uint8_t *passphrase, size_t passphrase_len, uint8_t **out, size_t *out_len);
+int32_t scomm_prims_csr_create(const uint8_t *pkcs8, size_t pkcs8_len,
+    const uint8_t *subject, size_t subject_len, uint8_t **out, size_t *out_len);
+
 #ifdef __cplusplus
 }
 #endif

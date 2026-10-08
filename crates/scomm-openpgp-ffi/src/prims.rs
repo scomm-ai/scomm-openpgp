@@ -4,7 +4,11 @@
 use openssl::hash::{hash, MessageDigest};
 use openssl::kdf::argon2id;
 use openssl::pkcs5::pbkdf2_hmac;
-use openssl::bn::BigNum;
+use openssl::bn::{BigNum, BigNumContext};
+use openssl::ec::{EcGroup, EcKey, EcPoint};
+use openssl::nid::Nid;
+use openssl::rsa::Rsa;
+use openssl::x509::{X509NameBuilder, X509ReqBuilder};
 use openssl::ecdsa::EcdsaSig;
 use openssl::pkey::PKey;
 use openssl::rand::rand_bytes;
@@ -199,6 +203,186 @@ pub fn aes_cbc_encrypt(key: &[u8], iv: &[u8], plaintext: &[u8]) -> Result<Vec<u8
 pub fn aes_cbc_decrypt(key: &[u8], iv: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, String> {
     openssl::symm::decrypt(aes_cbc_cipher(key)?, key, Some(iv), ciphertext)
         .map_err(|_| "aes-cbc".to_string())
+}
+
+/// Key kinds shared with the C ABI: 1 EC P-256, 2 RSA-2048, 3 RSA-3072, 4 Ed25519.
+/// Returns (PKCS#8 PrivateKeyInfo DER, SubjectPublicKeyInfo DER).
+pub fn pkey_generate(kind: i32) -> Result<(Vec<u8>, Vec<u8>), String> {
+    init();
+    let key = match kind {
+        1 => {
+            let group =
+                EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).map_err(|e| e.to_string())?;
+            let ec = EcKey::generate(&group).map_err(|e| e.to_string())?;
+            PKey::from_ec_key(ec).map_err(|e| e.to_string())?
+        }
+        2 | 3 => {
+            let bits = if kind == 2 { 2048 } else { 3072 };
+            let rsa = Rsa::generate(bits).map_err(|e| e.to_string())?;
+            PKey::from_rsa(rsa).map_err(|e| e.to_string())?
+        }
+        4 => PKey::generate_ed25519().map_err(|e| e.to_string())?,
+        _ => return Err("key kind".into()),
+    };
+    key_der(&key)
+}
+
+fn key_der(key: &PKey<openssl::pkey::Private>) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let pkcs8 = key.private_key_to_pkcs8().map_err(|e| e.to_string())?;
+    let spki = key.public_key_to_der().map_err(|e| e.to_string())?;
+    Ok((pkcs8, spki))
+}
+
+/// EC P-256 key pair from a 32-byte private scalar (public point recomputed).
+pub fn ec_p256_from_scalar(d: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    init();
+    let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).map_err(|e| e.to_string())?;
+    let d = BigNum::from_slice(d).map_err(|e| e.to_string())?;
+    let ctx = BigNumContext::new().map_err(|e| e.to_string())?;
+    let mut point = EcPoint::new(&group).map_err(|e| e.to_string())?;
+    point
+        .mul_generator(&group, &d, &ctx)
+        .map_err(|e| e.to_string())?;
+    let ec = EcKey::from_private_components(&group, &d, &point).map_err(|e| e.to_string())?;
+    key_der(&PKey::from_ec_key(ec).map_err(|e| e.to_string())?)
+}
+
+/// Schemes: 1 ECDSA-SHA256 (ASN.1 DER), 2 RSASSA-PKCS1-v1_5-SHA256, 3 Ed25519.
+pub fn pkey_sign(scheme: i32, pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
+    init();
+    let key = PKey::private_key_from_der(pkcs8).map_err(|e| e.to_string())?;
+    match scheme {
+        1 | 2 => {
+            let want = if scheme == 1 {
+                openssl::pkey::Id::EC
+            } else {
+                openssl::pkey::Id::RSA
+            };
+            if key.id() != want {
+                return Err("key type".into());
+            }
+            let mut signer =
+                Signer::new(MessageDigest::sha256(), &key).map_err(|e| e.to_string())?;
+            signer.update(message).map_err(|e| e.to_string())?;
+            signer.sign_to_vec().map_err(|e| e.to_string())
+        }
+        3 => {
+            if key.id() != openssl::pkey::Id::ED25519 {
+                return Err("key type".into());
+            }
+            let mut signer = Signer::new_without_digest(&key).map_err(|e| e.to_string())?;
+            signer
+                .sign_oneshot_to_vec(message)
+                .map_err(|e| e.to_string())
+        }
+        _ => Err("sign scheme".into()),
+    }
+}
+
+fn der(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    let n = content.len();
+    if n < 0x80 {
+        out.push(n as u8);
+    } else if n < 0x100 {
+        out.extend([0x81, n as u8]);
+    } else if n < 0x10000 {
+        out.extend([0x82, (n >> 8) as u8, n as u8]);
+    } else {
+        out.extend([0x83, (n >> 16) as u8, (n >> 8) as u8, n as u8]);
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+fn der_uint(v: u32) -> Vec<u8> {
+    let mut bytes: Vec<u8> = v
+        .to_be_bytes()
+        .into_iter()
+        .skip_while(|b| *b == 0)
+        .collect();
+    if bytes.is_empty() {
+        bytes.push(0);
+    }
+    if bytes[0] & 0x80 != 0 {
+        bytes.insert(0, 0);
+    }
+    der(0x02, &bytes)
+}
+
+const OID_PBES2: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0D];
+const OID_PBKDF2: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0C];
+const OID_HMAC_SHA256: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x02, 0x09];
+const OID_AES256_CBC: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2A];
+
+/// PKCS#8 PrivateKeyInfo -> EncryptedPrivateKeyInfo (PBES2, PBKDF2-HMAC-SHA256,
+/// AES-256-CBC) with the given iteration count.
+pub fn pkcs8_encrypt(pkcs8: &[u8], passphrase: &[u8], iterations: u32) -> Result<Vec<u8>, String> {
+    init();
+    if iterations == 0 {
+        return Err("iterations".into());
+    }
+    let salt = random(16)?;
+    let iv = random(16)?;
+    let key = pbkdf2_hmac_sha256(passphrase, &salt, iterations as usize, 32)?;
+    let encrypted = aes_cbc_encrypt(&key, &iv, pkcs8)?;
+
+    let prf = der(0x30, &[der(0x06, OID_HMAC_SHA256), vec![0x05, 0x00]].concat());
+    let kdf_params = der(0x30, &[der(0x04, &salt), der_uint(iterations), prf].concat());
+    let kdf = der(0x30, &[der(0x06, OID_PBKDF2), kdf_params].concat());
+    let scheme = der(0x30, &[der(0x06, OID_AES256_CBC), der(0x04, &iv)].concat());
+    let pbes2 = der(
+        0x30,
+        &[der(0x06, OID_PBES2), der(0x30, &[kdf, scheme].concat())].concat(),
+    );
+    Ok(der(0x30, &[pbes2, der(0x04, &encrypted)].concat()))
+}
+
+/// Any OpenSSL-readable EncryptedPrivateKeyInfo DER -> PKCS#8 PrivateKeyInfo DER.
+pub fn pkcs8_decrypt(encrypted: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, String> {
+    init();
+    let key = PKey::private_key_from_pkcs8_passphrase(encrypted, passphrase)
+        .map_err(|_| "pkcs8 passphrase".to_string())?;
+    key.private_key_to_pkcs8().map_err(|e| e.to_string())
+}
+
+/// PKCS#10 CertificationRequest DER for a PKCS#8 key. `subject` is `CN=..,O=..`.
+pub fn csr_create(pkcs8: &[u8], subject: &str) -> Result<Vec<u8>, String> {
+    init();
+    let key = PKey::private_key_from_der(pkcs8).map_err(|e| e.to_string())?;
+    let mut name = X509NameBuilder::new().map_err(|e| e.to_string())?;
+    let mut any = false;
+    for part in subject.split(',') {
+        let Some((k, v)) = part.split_once('=') else {
+            continue;
+        };
+        let nid = match k.trim().to_uppercase().as_str() {
+            "O" => Nid::ORGANIZATIONNAME,
+            "OU" => Nid::ORGANIZATIONALUNITNAME,
+            "C" => Nid::COUNTRYNAME,
+            "L" => Nid::LOCALITYNAME,
+            "ST" => Nid::STATEORPROVINCENAME,
+            _ => Nid::COMMONNAME,
+        };
+        name.append_entry_by_nid(nid, v.trim())
+            .map_err(|e| e.to_string())?;
+        any = true;
+    }
+    if !any {
+        name.append_entry_by_nid(Nid::COMMONNAME, subject)
+            .map_err(|e| e.to_string())?;
+    }
+    let name = name.build();
+    let mut req = X509ReqBuilder::new().map_err(|e| e.to_string())?;
+    req.set_subject_name(&name).map_err(|e| e.to_string())?;
+    req.set_pubkey(&key).map_err(|e| e.to_string())?;
+    let md = if key.id() == openssl::pkey::Id::ED25519 {
+        MessageDigest::null()
+    } else {
+        MessageDigest::sha256()
+    };
+    req.sign(&key, md).map_err(|e| e.to_string())?;
+    req.build().to_der().map_err(|e| e.to_string())
 }
 
 pub fn random(n: usize) -> Result<Vec<u8>, String> {
@@ -476,6 +660,53 @@ mod tests {
         let ct = aes_cbc_encrypt(&key, &iv, b"hello").unwrap();
         assert_eq!(ct.len(), 16);
         assert_eq!(aes_cbc_decrypt(&key, &iv, &ct).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn pkey_generate_sign_and_csr() {
+        for kind in 1..=4 {
+            let (pkcs8, spki) = pkey_generate(kind).unwrap();
+            let scheme = match kind {
+                1 => 1,
+                4 => 3,
+                _ => 2,
+            };
+            let sig = pkey_sign(scheme, &pkcs8, b"msg").unwrap();
+            let ok = match kind {
+                1 => ecdsa_verify(3, &spki, b"msg", &sig, false).unwrap(),
+                4 => {
+                    let key = PKey::public_key_from_der(&spki).unwrap();
+                    ed25519_verify(&key.raw_public_key().unwrap(), b"msg", &sig).unwrap()
+                }
+                _ => rsa_pkcs1_verify(3, &spki, b"msg", &sig).unwrap(),
+            };
+            assert!(ok, "kind {kind}");
+            let csr = csr_create(&pkcs8, "CN=device,O=Example").unwrap();
+            let req = openssl::x509::X509Req::from_der(&csr).unwrap();
+            assert!(req.verify(&req.public_key().unwrap()).unwrap(), "csr {kind}");
+        }
+    }
+
+    #[test]
+    fn pkcs8_pbes2_roundtrip_and_wrong_passphrase() {
+        let (pkcs8, _) = pkey_generate(1).unwrap();
+        let enc = pkcs8_encrypt(&pkcs8, b"correct horse", 1000).unwrap();
+        assert_eq!(pkcs8_decrypt(&enc, b"correct horse").unwrap(), pkcs8);
+        assert!(pkcs8_decrypt(&enc, b"wrong").is_err());
+    }
+
+    #[test]
+    fn ec_p256_scalar_matches_generated_public() {
+        let (pkcs8, spki) = pkey_generate(1).unwrap();
+        let key = PKey::private_key_from_der(&pkcs8).unwrap();
+        let d = key
+            .ec_key()
+            .unwrap()
+            .private_key()
+            .to_vec_padded(32)
+            .unwrap();
+        let (_, spki_again) = ec_p256_from_scalar(&d).unwrap();
+        assert_eq!(spki, spki_again);
     }
 
     #[test]
