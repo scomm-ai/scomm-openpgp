@@ -4,7 +4,9 @@ Pod::Spec.new do |s|
   s.summary          = 'Scomm OpenPGP FFI plugin'
   s.description      = 'Loads the scomm_openpgp cdylib. Sequoia is an implementation detail.'
   s.homepage         = 'https://github.com/scomm-ai/scomm-openpgp'
-  s.license          = { :type => 'LGPL-2.0-or-later', :file => '../../../LICENSE' }
+  # Type only. A :file path is resolved from the Flutter plugin symlink
+  # (macos/.symlinks/plugins/...), not from this repository root.
+  s.license          = { :type => 'LGPL-2.0-or-later' }
   s.author           = { 'Scomm.AI' => 'hello@scomm.ai' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
