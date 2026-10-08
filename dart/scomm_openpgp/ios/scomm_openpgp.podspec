@@ -7,8 +7,8 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'LGPL-2.0-or-later', :file => '../../../LICENSE' }
   s.author           = { 'Scomm.AI' => 'hello@scomm.ai' }
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
-  s.vendored_frameworks = 'Frameworks/libscomm_openpgp.xcframework'
+  s.source_files     = 'scomm_openpgp/Sources/scomm_openpgp/**/*'
+  s.vendored_frameworks = 'scomm_openpgp/Frameworks/libscomm_openpgp.xcframework'
   s.dependency 'Flutter'
   s.platform = :ios, '14.0'
   s.pod_target_xcconfig = {

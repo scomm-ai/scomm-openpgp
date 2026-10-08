@@ -344,23 +344,23 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          framework_dest="dart/scomm_openpgp/ios/Frameworks/libscomm_openpgp.xcframework"
+          framework_dest="dart/scomm_openpgp/ios/scomm_openpgp/Frameworks/libscomm_openpgp.xcframework"
           if [ -d prebuilt/ios-xcframework/libscomm_openpgp.xcframework ]; then
             rm -rf "$framework_dest"
-            mkdir -p dart/scomm_openpgp/ios/Frameworks
+            mkdir -p dart/scomm_openpgp/ios/scomm_openpgp/Frameworks
             mv prebuilt/ios-xcframework/libscomm_openpgp.xcframework "$framework_dest"
             rm -rf prebuilt/ios-xcframework
           elif [ -d prebuilt/ios-xcframework/ios-arm64 ] || [ -f prebuilt/ios-xcframework/Info.plist ]; then
             rm -rf "$framework_dest"
-            mkdir -p dart/scomm_openpgp/ios/Frameworks
+            mkdir -p dart/scomm_openpgp/ios/scomm_openpgp/Frameworks
             mv prebuilt/ios-xcframework "$framework_dest"
           fi
           if [ -d "$framework_dest" ]; then
             rm -rf prebuilt/aarch64-apple-ios prebuilt/aarch64-apple-ios-sim prebuilt/x86_64-apple-ios
           fi
           git add prebuilt
-          if [ -d dart/scomm_openpgp/ios/Frameworks ]; then
-            git add dart/scomm_openpgp/ios/Frameworks
+          if [ -d dart/scomm_openpgp/ios/scomm_openpgp/Frameworks ]; then
+            git add dart/scomm_openpgp/ios/scomm_openpgp/Frameworks
           fi
           if git diff --cached --quiet; then
             echo "Prebuilt libraries are unchanged."

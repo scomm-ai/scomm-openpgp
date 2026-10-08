@@ -4,7 +4,7 @@ CI builds these cdylibs and commits them here. App builds copy or download the
 file for the host triple. They do not compile OpenSSL.
 
 iOS is not a loose dylib. CI wraps the device and simulator slices into
-`dart/scomm_openpgp/ios/Frameworks/libscomm_openpgp.xcframework`.
+`dart/scomm_openpgp/ios/scomm_openpgp/Frameworks/libscomm_openpgp.xcframework`.
 
 | Triple | File |
 | --- | --- |
@@ -20,5 +20,5 @@ iOS is not a loose dylib. CI wraps the device and simulator slices into
 | `i686-linux-android` | `libscomm_openpgp.so` |
 | `aarch64-linux-android` | `libscomm_openpgp.so` |
 | `armv7-linux-androideabi` | `libscomm_openpgp.so` |
-| `aarch64-apple-ios` | `dart/scomm_openpgp/ios/Frameworks/libscomm_openpgp.xcframework` (device slice) |
+| `aarch64-apple-ios` | `dart/scomm_openpgp/ios/scomm_openpgp/Frameworks/libscomm_openpgp.xcframework` (device slice) |
 | `aarch64-apple-ios-sim`, `x86_64-apple-ios` | same xcframework (simulator slice) |
