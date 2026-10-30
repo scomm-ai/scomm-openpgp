@@ -19,7 +19,7 @@ sequoia-openpgp = { version = "=2.4.1", default-features = false }
 openssl = { version = "0.10.78", features = ["vendored"] }
 
 [patch.crates-io]
-openssl-src = { git = "https://github.com/advforks/openssl-src-rs", rev = "a9fb57d6879f0765c2790d0c67ee3607366357a7" }
+openssl-src = { git = "https://github.com/advforks/openssl-src-rs", rev = "1883835790f36abf04aa4756806e3cebadff3ded" }
 
 [profile.release]
 lto = "fat"
