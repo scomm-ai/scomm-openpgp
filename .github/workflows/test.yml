@@ -11,7 +11,19 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Interop tests fail instead of skipping when gpg is missing.
+      SCOMM_INTEROP_REQUIRE_TOOLS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked --workspace
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Show GnuPG version
+        run: gpg --version | head -1
+      - run: cargo test --locked --workspace -- --nocapture
