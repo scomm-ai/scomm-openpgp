@@ -27,6 +27,11 @@ on:
     branches: [main]
     paths-ignore:
       - "prebuilt/**"
+      - "interop/**"
+      - "crates/*/tests/**"
+      - ".github/workflows/test.yml"
+      - ".github/workflows/dead-code.yml"
+      - "**/*.md"
 
 permissions:
   contents: write
