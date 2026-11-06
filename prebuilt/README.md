@@ -1,7 +1,8 @@
 # Prebuilt `scomm_openpgp` libraries
 
-CI builds these cdylibs and commits them here. App builds copy or download the
-file for the host triple. They do not compile OpenSSL.
+CI builds these cdylibs and commits them here. App builds copy the file for the
+host triple from the pinned revision. They do not compile OpenSSL or download
+anything, so pin a revision that CI has published.
 
 iOS is not a loose dylib. CI wraps the device and simulator slices into
 `dart/scomm_openpgp/ios/scomm_openpgp/Frameworks/libscomm_openpgp.xcframework`.

@@ -141,7 +141,7 @@ jobs:
           AR_i686_unknown_linux_gnu: i686-linux-gnu-ar
           CFLAGS_x86_64_apple_darwin: -arch x86_64
           CC_x86_64_apple_darwin: clang
-        run: cargo build --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
+        run: cargo build --locked --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
@@ -191,7 +191,7 @@ jobs:
           AR_armv7_linux_androideabi: llvm-ar
           AR_i686_linux_android: llvm-ar
           AR_x86_64_linux_android: llvm-ar
-        run: cargo build --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
+        run: cargo build --locked --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
@@ -216,7 +216,7 @@ jobs:
         run: |
           export SDKROOT="$(xcrun --sdk ${{ matrix.sdk }} --show-sdk-path)"
           export IPHONEOS_DEPLOYMENT_TARGET=14.0
-          cargo build --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
+          cargo build --locked --release --target ${{ matrix.target }} -p scomm-openpgp-ffi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}

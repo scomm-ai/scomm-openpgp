@@ -53,6 +53,7 @@ fn node_encrypt(public_name: &str, nonce: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+#[ignore = "needs a ../pubkey checkout and node"]
 fn server_encoder_messages_decrypt_in_sequoia() {
     let nonce = b"0123456789abcdef0123456789abcdef";
     let v6 = node_encrypt("A-1-2.asc", nonce);
@@ -68,6 +69,7 @@ fn server_encoder_messages_decrypt_in_sequoia() {
 }
 
 #[test]
+#[ignore = "needs a ../pubkey checkout and node"]
 fn server_verifier_accepts_sign_pop() {
     let p = pgp();
     if !p.rfc9980_ready() {
