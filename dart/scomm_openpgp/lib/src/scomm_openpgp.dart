@@ -223,6 +223,9 @@ class ScommOpenPgp {
         _bufferFree = _lib.lookupFunction<_BufferFreeN, _BufferFreeD>(
           'scomm_openpgp_buffer_free',
         ),
+        _opensslVersion = _lib.lookupFunction<_LastErrorN, _LastErrorD>(
+          'scomm_openpgp_openssl_version',
+        ),
         _lastError = _lib.lookupFunction<_LastErrorN, _LastErrorD>(
           'scomm_openpgp_last_error',
         ),
@@ -273,6 +276,7 @@ class ScommOpenPgp {
     ffi.Pointer<ffi.Size>,
   ) _sha256;
   final int Function() _abiVersion;
+  final _LastErrorD _opensslVersion;
   final void Function(ffi.Pointer<ffi.Uint8>, int) _bufferFree;
   final int Function(
     ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
@@ -365,6 +369,16 @@ class ScommOpenPgp {
   int get abiVersion => _abiVersion();
 
   bool get rfc9980Ready => _rfc9980Ready() != 0;
+
+  /// Version text of the linked libcrypto, such as `OpenSSL 4.1.0 23 Oct 2026`.
+  String get opensslVersion {
+    return using((arena) {
+      final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
+      final outLen = arena<ffi.Size>();
+      _opensslVersion(outPtr, outLen);
+      return utf8.decode(_take(outPtr.value, outLen.value));
+    });
+  }
 
   OpenPgpKeyInspect inspectKey(List<int> key) {
     return OpenPgpKeyInspect.fromJson(

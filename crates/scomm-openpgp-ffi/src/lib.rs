@@ -172,6 +172,16 @@ pub unsafe extern "C" fn scomm_openpgp_last_error(
     0
 }
 
+/// Version text of the linked libcrypto, such as `OpenSSL 4.1.0 23 Oct 2026`.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_openssl_version(
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    write_buf(prims::openssl_version().as_bytes(), out, out_len);
+    0
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn scomm_openpgp_inspect(
     key: *const u8,
@@ -1059,4 +1069,13 @@ pub unsafe extern "C" fn scomm_prims_pkcs8_public_spki(
     out_len: *mut usize,
 ) -> i32 {
     prim_out(prims::pkcs8_public_spki(read_slice(pkcs8, pkcs8_len)), out, out_len)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn links_openssl_4_1() {
+        let version = crate::prims::openssl_version();
+        assert!(version.starts_with("OpenSSL 4.1."), "{version}");
+    }
 }

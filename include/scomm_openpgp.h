@@ -12,6 +12,9 @@ uint32_t scomm_openpgp_abi_version(void);
 void scomm_openpgp_buffer_free(uint8_t *ptr, size_t len);
 int32_t scomm_openpgp_last_error(uint8_t **out, size_t *out_len);
 
+/* Version text of the linked libcrypto. */
+int32_t scomm_openpgp_openssl_version(uint8_t **out, size_t *out_len);
+
 int32_t scomm_openpgp_inspect(
     const uint8_t *key, size_t key_len,
     uint8_t **json_out, size_t *json_len);

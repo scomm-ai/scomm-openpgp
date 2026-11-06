@@ -37,6 +37,12 @@ fn ctx() -> ossl::OsslContext {
     ossl::OsslContext::new_lib_ctx()
 }
 
+/// Version text of the libcrypto linked into this library.
+pub fn openssl_version() -> &'static str {
+    init();
+    openssl::version::version()
+}
+
 pub fn sha256(data: &[u8]) -> Result<Vec<u8>, String> {
     init();
     hash(MessageDigest::sha256(), data)
