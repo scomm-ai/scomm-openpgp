@@ -6,6 +6,7 @@ use sequoia_openpgp::cert::prelude::*;
 use sequoia_openpgp::parse::Parse;
 use sequoia_openpgp::policy::StandardPolicy;
 use sequoia_openpgp::serialize::stream::{Compressor, Encryptor, LiteralWriter, Message};
+use sequoia_openpgp::serialize::SerializeInto;
 use sequoia_openpgp::types::CompressionAlgorithm;
 
 fn pgp() -> SequoiaOpenPgp {
@@ -389,4 +390,45 @@ fn decrypts_compressed_messages() {
         let out = pgp().decrypt(&sink, &key.secret, None).expect("decrypt");
         assert_eq!(out.plaintext, b"compressed mail", "{algo:?}");
     }
+}
+
+fn names_of(key: &[u8]) -> (String, Vec<String>) {
+    let info = pgp().inspect_key(key).expect("inspect");
+    let mut subs: Vec<String> = info.subkeys.iter().map(|s| s.algorithm.clone()).collect();
+    subs.sort();
+    (info.algorithm, subs)
+}
+
+#[test]
+fn catalog_names_describe_the_real_algorithm() {
+    for profile in [KeyProfile::ClassicalCv25519, KeyProfile::Rfc9580Cv25519] {
+        let key = pgp()
+            .generate_key(&GenerateKeyOptions {
+                userid: "Alice <alice@example.com>".into(),
+                passphrase: None,
+                profile,
+            })
+            .expect("generate");
+        let (primary, subs) = names_of(&key.public);
+        assert_eq!(primary, "openpgp-ed25519", "{profile:?}");
+        assert_eq!(subs, ["openpgp-cv25519", "openpgp-ed25519"], "{profile:?}");
+    }
+    for (suite, primary, ecdh, ecdsa) in [
+        (CipherSuite::P256, "openpgp-ecdsa-p256", "openpgp-ecdh-p256", "openpgp-ecdsa-p256"),
+        (CipherSuite::P384, "openpgp-ecdsa-p384", "openpgp-ecdh-p384", "openpgp-ecdsa-p384"),
+        (CipherSuite::P521, "openpgp-ecdsa-p521", "openpgp-ecdh-p521", "openpgp-ecdsa-p521"),
+    ] {
+        let (cert, _) = CertBuilder::general_purpose(Some("Nist <nist@example.com>"))
+            .set_cipher_suite(suite)
+            .generate()
+            .unwrap();
+        let (got, subs) = names_of(&cert.to_vec().unwrap());
+        assert_eq!(got, primary);
+        assert_eq!(subs, [ecdh, ecdsa]);
+    }
+    let (cert, _) = CertBuilder::general_purpose(Some("Rsa <rsa@example.com>"))
+        .set_cipher_suite(CipherSuite::RSA2k)
+        .generate()
+        .unwrap();
+    assert_eq!(names_of(&cert.to_vec().unwrap()).0, "openpgp-rsa2048");
 }

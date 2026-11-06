@@ -4,15 +4,16 @@ use std::io::{self, Write};
 
 use sequoia_openpgp::armor::{self, Kind as SequoiaArmorKind};
 use sequoia_openpgp::cert::prelude::*;
-use sequoia_openpgp::crypto::Password;
+use sequoia_openpgp::crypto::{mpi, Password};
 use sequoia_openpgp::parse::Parse;
 use sequoia_openpgp::policy::StandardPolicy;
 use sequoia_openpgp::serialize::stream::{Armorer, Encryptor, LiteralWriter, Message, Signer};
 use sequoia_openpgp::serialize::SerializeInto;
 use sequoia_openpgp::cert::CipherSuite;
 use sequoia_openpgp::packet::signature::SignatureBuilder;
+use sequoia_openpgp::packet::{key, Key};
 use sequoia_openpgp::types::{
-    AEADAlgorithm, PublicKeyAlgorithm, SignatureType, SymmetricAlgorithm,
+    AEADAlgorithm, Curve, PublicKeyAlgorithm, SignatureType, SymmetricAlgorithm,
 };
 use sequoia_openpgp::Cert;
 use sequoia_openpgp::KeyHandle;
@@ -533,10 +534,34 @@ pub(crate) fn reject_librepgp(cert: &Cert) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn catalog_name(algo: PublicKeyAlgorithm) -> String {
-    match u8::from(algo) {
-        22 => "openpgp-ed25519".into(),
-        18 => "openpgp-cv25519".into(),
+/// Directory catalog name. The algorithm ID alone does not name a key: ECDSA,
+/// ECDH and RSA also need the curve or size, and RFC 9580 gives Ed25519 and
+/// X25519 their own IDs beside the legacy EdDSA and ECDH ones. Names the catalog
+/// does not list, such as `openpgp-ecdh-p256`, still describe the key exactly so
+/// nothing publishes it under a different algorithm.
+pub(crate) fn catalog_name<P, R>(key: &Key<P, R>) -> String
+where
+    P: key::KeyParts,
+    R: key::KeyRole,
+{
+    let curve = match key.mpis() {
+        mpi::PublicKey::ECDSA { curve, .. }
+        | mpi::PublicKey::EdDSA { curve, .. }
+        | mpi::PublicKey::ECDH { curve, .. } => curve_name(curve),
+        _ => "unknown".into(),
+    };
+    let curve = curve.as_str();
+    let bits = key.mpis().bits().unwrap_or(0);
+    match u8::from(key.pk_algo()) {
+        27 => "openpgp-ed25519".into(),
+        28 => "openpgp-ed448".into(),
+        25 => "openpgp-cv25519".into(),
+        26 => "openpgp-cv448".into(),
+        22 if curve == "ed25519" => "openpgp-ed25519".into(),
+        22 => format!("openpgp-eddsa-{curve}"),
+        18 if curve == "cv25519" => "openpgp-cv25519".into(),
+        18 => format!("openpgp-ecdh-{curve}"),
+        19 => format!("openpgp-ecdsa-{curve}"),
         ALG_ML_DSA_65_ED25519 => "openpgp-mldsa65-ed25519".into(),
         ALG_ML_DSA_87_ED448 => "openpgp-mldsa87-ed448".into(),
         ALG_SLH_DSA_128S => "openpgp-slhdsa-shake128s".into(),
@@ -544,8 +569,24 @@ pub(crate) fn catalog_name(algo: PublicKeyAlgorithm) -> String {
         ALG_SLH_DSA_256S => "openpgp-slhdsa-shake256s".into(),
         ALG_ML_KEM_768_X25519 => "openpgp-mlkem768-x25519".into(),
         ALG_ML_KEM_1024_X448 => "openpgp-mlkem1024-x448".into(),
-        1 | 2 | 3 => "openpgp-rsa".into(),
+        1..=3 => format!("openpgp-rsa{bits}"),
+        16 | 20 => "openpgp-elgamal".into(),
+        17 => format!("openpgp-dsa{bits}"),
         other => format!("openpgp-pk-{other}"),
+    }
+}
+
+fn curve_name(curve: &Curve) -> String {
+    match curve {
+        Curve::NistP256 => "p256".into(),
+        Curve::NistP384 => "p384".into(),
+        Curve::NistP521 => "p521".into(),
+        Curve::BrainpoolP256 => "brainpool-p256".into(),
+        Curve::BrainpoolP384 => "brainpool-p384".into(),
+        Curve::BrainpoolP512 => "brainpool-p512".into(),
+        Curve::Ed25519 => "ed25519".into(),
+        Curve::Cv25519 => "cv25519".into(),
+        _ => "unknown".into(),
     }
 }
 
