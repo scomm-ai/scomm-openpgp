@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Read};
 
 use sequoia_openpgp::crypto::Password;
 use sequoia_openpgp::parse::stream::{
@@ -13,6 +13,22 @@ use scomm_openpgp_core::*;
 use crate::{
     decrypt_policy, fingerprint_of, generate_policy, key_id_of, parse_cert, reject_librepgp,
 };
+
+/// Compression lets a small message expand without bound, so decrypted output
+/// above this is refused instead of exhausting memory.
+const MAX_PLAINTEXT_BYTES: u64 = 256 * 1024 * 1024;
+
+fn read_limited(reader: impl io::Read, limit: u64) -> Result<Vec<u8>> {
+    let mut plaintext = Vec::new();
+    reader
+        .take(limit + 1)
+        .read_to_end(&mut plaintext)
+        .map_err(|_| OpenPgpError::DecryptionFailed)?;
+    if plaintext.len() as u64 > limit {
+        return Err(OpenPgpError::MalformedMessage);
+    }
+    Ok(plaintext)
+}
 
 pub struct DecryptOutcome {
     pub plaintext: Vec<u8>,
@@ -148,8 +164,7 @@ pub fn decrypt(
                 OpenPgpError::MalformedMessage
             }
         })?;
-    let mut plaintext = Vec::new();
-    io::copy(&mut decryptor, &mut plaintext).map_err(|_| OpenPgpError::DecryptionFailed)?;
+    let plaintext = read_limited(&mut decryptor, MAX_PLAINTEXT_BYTES)?;
     let helper = decryptor.into_helper();
     if helper.recipient_key_id.is_none() && plaintext.is_empty() {
         return Err(OpenPgpError::DecryptionFailed);
@@ -230,4 +245,18 @@ pub fn verify_detached(
         signer_fingerprint: helper.fingerprint,
         signer_key_id: helper.key_id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_limited_accepts_the_limit_and_refuses_more() {
+        assert_eq!(read_limited(&b"abcd"[..], 4).unwrap(), b"abcd");
+        assert!(matches!(
+            read_limited(&b"abcde"[..], 4),
+            Err(OpenPgpError::MalformedMessage)
+        ));
+    }
 }

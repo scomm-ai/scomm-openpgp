@@ -1,5 +1,12 @@
+use std::io::Write;
+
 use scomm_openpgp_core::*;
 use scomm_openpgp_sequoia::SequoiaOpenPgp;
+use sequoia_openpgp::cert::prelude::*;
+use sequoia_openpgp::parse::Parse;
+use sequoia_openpgp::policy::StandardPolicy;
+use sequoia_openpgp::serialize::stream::{Compressor, Encryptor, LiteralWriter, Message};
+use sequoia_openpgp::types::CompressionAlgorithm;
 
 fn pgp() -> SequoiaOpenPgp {
     SequoiaOpenPgp::new()
@@ -350,4 +357,36 @@ fn assert_pop_signature(sig_bytes: &[u8], _public: &[u8], _data: &[u8]) {
             .any(|w| w == b"scomm-pop@scomm.ai"),
         "missing PoP notation"
     );
+}
+
+/// GnuPG compresses by default. A build without Sequoia's compression features
+/// reports this mail as malformed.
+#[test]
+fn decrypts_compressed_messages() {
+    let key = gen("Alice <alice@example.com>");
+    let cert = Cert::from_bytes(&key.public).unwrap();
+    let policy = StandardPolicy::new();
+    for algo in [
+        CompressionAlgorithm::Zip,
+        CompressionAlgorithm::Zlib,
+        CompressionAlgorithm::BZip2,
+    ] {
+        let recipients = cert
+            .keys()
+            .with_policy(&policy, None)
+            .supported()
+            .alive()
+            .revoked(false)
+            .for_transport_encryption();
+        let mut sink = Vec::new();
+        let message = Message::new(&mut sink);
+        let message = Encryptor::for_recipients(message, recipients).build().unwrap();
+        let message = Compressor::new(message).algo(algo).build().unwrap();
+        let mut literal = LiteralWriter::new(message).build().unwrap();
+        literal.write_all(b"compressed mail").unwrap();
+        literal.finalize().unwrap();
+
+        let out = pgp().decrypt(&sink, &key.secret, None).expect("decrypt");
+        assert_eq!(out.plaintext, b"compressed mail", "{algo:?}");
+    }
 }
