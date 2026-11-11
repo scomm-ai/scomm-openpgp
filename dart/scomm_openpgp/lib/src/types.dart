@@ -1,3 +1,40 @@
+/// Detached PGP/MIME signature result (`scomm_openpgp_verify_detached`).
+/// Validity only: trust comes from the app's pins.
+class OpenPgpSignatureVerdict {
+  const OpenPgpSignatureVerdict({
+    required this.validity,
+    required this.weakAlgorithm,
+    this.signerFingerprint,
+    this.signerPrimaryFingerprint,
+    this.signerKeyId,
+  });
+
+  /// `valid`, `invalid`, `unknown-signer`, `malformed` or `unsupported`.
+  final String validity;
+
+  /// The (sub)key that signed.
+  final String? signerFingerprint;
+
+  /// The certificate's primary key; pins are keyed by this.
+  final String? signerPrimaryFingerprint;
+  final String? signerKeyId;
+
+  /// Valid only under the old policy (for example SHA-1); never trusted.
+  final bool weakAlgorithm;
+
+  bool get isValid => validity == 'valid';
+
+  factory OpenPgpSignatureVerdict.fromJson(Map<String, dynamic> json) {
+    return OpenPgpSignatureVerdict(
+      validity: json['validity'] as String? ?? 'malformed',
+      signerFingerprint: json['signer_fingerprint'] as String?,
+      signerPrimaryFingerprint: json['signer_primary_fingerprint'] as String?,
+      signerKeyId: json['signer_key_id'] as String?,
+      weakAlgorithm: json['weak_algorithm'] as bool? ?? false,
+    );
+  }
+}
+
 class ScommOpenPgpException implements Exception {
   ScommOpenPgpException(this.code, this.message);
 

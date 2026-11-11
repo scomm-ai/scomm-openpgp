@@ -1,19 +1,19 @@
 //! Shared primitives on the one libcrypto. AES-GCM uses Crypter
 //! (EVP_EncryptUpdate / EVP_DecryptUpdate), never EVP_Cipher.
 
-use openssl::hash::{hash, MessageDigest};
-use openssl::kdf::argon2id;
-use openssl::pkcs5::pbkdf2_hmac;
 use openssl::bn::{BigNum, BigNumContext};
 use openssl::ec::{EcGroup, EcKey, EcPoint};
-use openssl::nid::Nid;
-use openssl::rsa::Rsa;
-use openssl::x509::{X509NameBuilder, X509ReqBuilder};
 use openssl::ecdsa::EcdsaSig;
+use openssl::hash::{hash, MessageDigest};
+use openssl::kdf::argon2id;
+use openssl::nid::Nid;
+use openssl::pkcs5::pbkdf2_hmac;
 use openssl::pkey::PKey;
 use openssl::rand::rand_bytes;
+use openssl::rsa::Rsa;
 use openssl::sign::{Signer, Verifier};
 use openssl::symm::{Cipher, Crypter, Mode};
+use openssl::x509::{X509NameBuilder, X509ReqBuilder};
 use ossl::pkey::{EvpPkey, EvpPkeyType, MlkeyData, PkeyData};
 use ossl::signature::{OsslSignature, SigAlg, SigOp};
 use ossl::OsslSecret;
@@ -50,6 +50,30 @@ pub fn sha256(data: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Streaming SHA-256 (R11) on one OpenSSL `EVP_MD_CTX`, for inputs too
+/// large to hold at once. `finish` resets it for reuse.
+pub struct Sha256Stream(openssl::hash::Hasher);
+
+impl Sha256Stream {
+    pub fn new() -> Result<Self, String> {
+        init();
+        openssl::hash::Hasher::new(MessageDigest::sha256())
+            .map(Sha256Stream)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn update(&mut self, data: &[u8]) -> Result<(), String> {
+        self.0.update(data).map_err(|e| e.to_string())
+    }
+
+    pub fn finish(&mut self) -> Result<[u8; 32], String> {
+        let d = self.0.finish().map_err(|e| e.to_string())?;
+        d.as_ref()
+            .try_into()
+            .map_err(|_| "sha256 length".to_string())
+    }
+}
+
 pub fn sha512(data: &[u8]) -> Result<Vec<u8>, String> {
     init();
     hash(MessageDigest::sha512(), data)
@@ -71,8 +95,14 @@ pub fn pbkdf2_hmac_sha256(
     out_len: usize,
 ) -> Result<Vec<u8>, String> {
     let mut out = vec![0u8; out_len];
-    pbkdf2_hmac(password, salt, iterations, MessageDigest::sha256(), &mut out)
-        .map_err(|e| e.to_string())?;
+    pbkdf2_hmac(
+        password,
+        salt,
+        iterations,
+        MessageDigest::sha256(),
+        &mut out,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -85,8 +115,10 @@ pub fn argon2id_derive(
     out_len: usize,
 ) -> Result<Vec<u8>, String> {
     let mut out = vec![0u8; out_len];
-    argon2id(None, password, salt, None, None, iterations, lanes, mem_kib, &mut out)
-        .map_err(|e| e.to_string())?;
+    argon2id(
+        None, password, salt, None, None, iterations, lanes, mem_kib, &mut out,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -293,63 +325,96 @@ pub fn pkey_sign(scheme: i32, pkcs8: &[u8], message: &[u8]) -> Result<Vec<u8>, S
     }
 }
 
-fn der(tag: u8, content: &[u8]) -> Vec<u8> {
-    let mut out = vec![tag];
-    let n = content.len();
-    if n < 0x80 {
-        out.push(n as u8);
-    } else if n < 0x100 {
-        out.extend([0x81, n as u8]);
-    } else if n < 0x10000 {
-        out.extend([0x82, (n >> 8) as u8, n as u8]);
-    } else {
-        out.extend([0x83, (n >> 16) as u8, (n >> 8) as u8, n as u8]);
-    }
-    out.extend_from_slice(content);
-    out
+// Present in the linked libcrypto but not bound by openssl-sys.
+extern "C" {
+    fn PKCS5_pbe2_set_iv_ex(
+        cipher: *const openssl_sys::EVP_CIPHER,
+        iter: std::ffi::c_int,
+        salt: *mut u8,
+        saltlen: std::ffi::c_int,
+        aiv: *mut u8,
+        prf_nid: std::ffi::c_int,
+        libctx: *mut std::ffi::c_void,
+    ) -> *mut openssl_sys::X509_ALGOR;
+    fn PKCS8_set0_pbe_ex(
+        pass: *const std::ffi::c_char,
+        passlen: std::ffi::c_int,
+        p8inf: *mut openssl_sys::PKCS8_PRIV_KEY_INFO,
+        pbe: *mut openssl_sys::X509_ALGOR,
+        libctx: *mut std::ffi::c_void,
+        propq: *const std::ffi::c_char,
+    ) -> *mut openssl_sys::X509_SIG;
+    fn i2d_X509_SIG(a: *const openssl_sys::X509_SIG, out: *mut *mut u8) -> std::ffi::c_int;
+    fn X509_SIG_free(a: *mut openssl_sys::X509_SIG);
+    fn X509_ALGOR_free(a: *mut openssl_sys::X509_ALGOR);
 }
-
-fn der_uint(v: u32) -> Vec<u8> {
-    let mut bytes: Vec<u8> = v
-        .to_be_bytes()
-        .into_iter()
-        .skip_while(|b| *b == 0)
-        .collect();
-    if bytes.is_empty() {
-        bytes.push(0);
-    }
-    if bytes[0] & 0x80 != 0 {
-        bytes.insert(0, 0);
-    }
-    der(0x02, &bytes)
-}
-
-const OID_PBES2: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0D];
-const OID_PBKDF2: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0C];
-const OID_HMAC_SHA256: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x02, 0x09];
-const OID_AES256_CBC: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2A];
 
 /// PKCS#8 PrivateKeyInfo -> EncryptedPrivateKeyInfo (PBES2, PBKDF2-HMAC-SHA256,
-/// AES-256-CBC) with the given iteration count.
+/// AES-256-CBC, 16-byte salt and IV) with the given iteration count, built
+/// by OpenSSL (R9). Same parameters as the earlier hand-built encoder, so
+/// `pkcs8_decrypt` reads blobs from both.
 pub fn pkcs8_encrypt(pkcs8: &[u8], passphrase: &[u8], iterations: u32) -> Result<Vec<u8>, String> {
+    use openssl_sys as ffi;
+    use std::ffi::c_int;
     init();
-    if iterations == 0 {
-        return Err("iterations".into());
+    let iter = c_int::try_from(iterations)
+        .ok()
+        .filter(|i| *i > 0)
+        .ok_or("iterations")?;
+    let passlen = c_int::try_from(passphrase.len()).map_err(|_| "passphrase")?;
+    let input_len = std::ffi::c_long::try_from(pkcs8.len()).map_err(|_| "pkcs8")?;
+    let mut salt = random(16)?;
+    let mut iv = random(16)?;
+    let failed = |what: &str| {
+        let _ = openssl::error::ErrorStack::get();
+        what.to_string()
+    };
+    unsafe {
+        let mut p = pkcs8.as_ptr();
+        let info = ffi::d2i_PKCS8_PRIV_KEY_INFO(std::ptr::null_mut(), &mut p, input_len);
+        if info.is_null() || p != pkcs8.as_ptr().add(pkcs8.len()) {
+            if !info.is_null() {
+                ffi::PKCS8_PRIV_KEY_INFO_free(info);
+            }
+            return Err(failed("not a PKCS#8 PrivateKeyInfo"));
+        }
+        let pbe = PKCS5_pbe2_set_iv_ex(
+            ffi::EVP_aes_256_cbc(),
+            iter,
+            salt.as_mut_ptr(),
+            16,
+            iv.as_mut_ptr(),
+            ffi::NID_hmacWithSHA256,
+            std::ptr::null_mut(),
+        );
+        if pbe.is_null() {
+            ffi::PKCS8_PRIV_KEY_INFO_free(info);
+            return Err(failed("PBES2 parameters"));
+        }
+        // Takes `pbe` on success only.
+        let sig = PKCS8_set0_pbe_ex(
+            passphrase.as_ptr().cast(),
+            passlen,
+            info,
+            pbe,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
+        ffi::PKCS8_PRIV_KEY_INFO_free(info);
+        if sig.is_null() {
+            X509_ALGOR_free(pbe);
+            return Err(failed("PKCS#8 encrypt"));
+        }
+        let len = i2d_X509_SIG(sig, std::ptr::null_mut());
+        let mut out = vec![0u8; len.max(0) as usize];
+        let mut w = out.as_mut_ptr();
+        let written = i2d_X509_SIG(sig, &mut w);
+        X509_SIG_free(sig);
+        if len <= 0 || written != len {
+            return Err(failed("EncryptedPrivateKeyInfo DER"));
+        }
+        Ok(out)
     }
-    let salt = random(16)?;
-    let iv = random(16)?;
-    let key = pbkdf2_hmac_sha256(passphrase, &salt, iterations as usize, 32)?;
-    let encrypted = aes_cbc_encrypt(&key, &iv, pkcs8)?;
-
-    let prf = der(0x30, &[der(0x06, OID_HMAC_SHA256), vec![0x05, 0x00]].concat());
-    let kdf_params = der(0x30, &[der(0x04, &salt), der_uint(iterations), prf].concat());
-    let kdf = der(0x30, &[der(0x06, OID_PBKDF2), kdf_params].concat());
-    let scheme = der(0x30, &[der(0x06, OID_AES256_CBC), der(0x04, &iv)].concat());
-    let pbes2 = der(
-        0x30,
-        &[der(0x06, OID_PBES2), der(0x30, &[kdf, scheme].concat())].concat(),
-    );
-    Ok(der(0x30, &[pbes2, der(0x04, &encrypted)].concat()))
 }
 
 /// Any OpenSSL-readable EncryptedPrivateKeyInfo DER -> PKCS#8 PrivateKeyInfo DER.
@@ -418,7 +483,9 @@ pub fn aes256gcm_encrypt(
         crypter.aad_update(aad).map_err(|e| e.to_string())?;
     }
     let mut out = vec![0u8; plaintext.len() + 32];
-    let mut n = crypter.update(plaintext, &mut out).map_err(|e| e.to_string())?;
+    let mut n = crypter
+        .update(plaintext, &mut out)
+        .map_err(|e| e.to_string())?;
     n += crypter.finalize(&mut out[n..]).map_err(|e| e.to_string())?;
     out.truncate(n);
     let mut tag = [0u8; 16];
@@ -441,8 +508,12 @@ pub fn aes256gcm_decrypt(
         crypter.aad_update(aad).map_err(|e| e.to_string())?;
     }
     let mut out = vec![0u8; ciphertext.len() + 32];
-    let mut n = crypter.update(ciphertext, &mut out).map_err(|e| e.to_string())?;
-    n += crypter.finalize(&mut out[n..]).map_err(|_| "aes-gcm tag".to_string())?;
+    let mut n = crypter
+        .update(ciphertext, &mut out)
+        .map_err(|e| e.to_string())?;
+    n += crypter
+        .finalize(&mut out[n..])
+        .map_err(|_| "aes-gcm tag".to_string())?;
     out.truncate(n);
     Ok(out)
 }
@@ -461,7 +532,9 @@ pub fn ed25519_sign(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
     let secret = PKey::private_key_from_raw_bytes(seed, openssl::pkey::Id::ED25519)
         .map_err(|e| e.to_string())?;
     let mut signer = Signer::new_without_digest(&secret).map_err(|e| e.to_string())?;
-    signer.sign_oneshot_to_vec(message).map_err(|e| e.to_string())
+    signer
+        .sign_oneshot_to_vec(message)
+        .map_err(|e| e.to_string())
 }
 
 pub fn x25519_public(seed: &[u8]) -> Result<Vec<u8>, String> {
@@ -487,7 +560,9 @@ pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result
     let key = PKey::public_key_from_raw_bytes(public, openssl::pkey::Id::ED25519)
         .map_err(|e| e.to_string())?;
     let mut verifier = Verifier::new_without_digest(&key).map_err(|e| e.to_string())?;
-    verifier.verify_oneshot(signature, message).map_err(|e| e.to_string())
+    verifier
+        .verify_oneshot(signature, message)
+        .map_err(|e| e.to_string())
 }
 
 pub fn mldsa65_public(seed: &[u8]) -> Result<Vec<u8>, String> {
@@ -506,7 +581,10 @@ pub fn mldsa65_public(seed: &[u8]) -> Result<Vec<u8>, String> {
     )
     .map_err(|e| e.to_string())?;
     match key.export().map_err(|e| e.to_string())? {
-        PkeyData::Mlkey(MlkeyData { pubkey: Some(ref pk), .. }) => Ok(pk.clone()),
+        PkeyData::Mlkey(MlkeyData {
+            pubkey: Some(ref pk),
+            ..
+        }) => Ok(pk.clone()),
         _ => Err("ml-dsa public".into()),
     }
 }
@@ -580,6 +658,58 @@ pub fn mldsa65_sign(seed: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every split of inputs around the 64-byte block boundary gives the
+    /// one-shot digest.
+    #[test]
+    fn sha256_stream_matches_one_shot_at_chunk_boundaries() {
+        let data: Vec<u8> = (0..300u32).map(|i| (i * 7 + 3) as u8).collect();
+        for len in [0usize, 1, 55, 56, 63, 64, 65, 127, 128, 129, 300] {
+            let want = sha256(&data[..len]).unwrap();
+            for split in [0usize, 1, 31, 32, 63, 64, 65, len] {
+                let split = split.min(len);
+                let mut s = Sha256Stream::new().unwrap();
+                s.update(&data[..split]).unwrap();
+                s.update(&[]).unwrap();
+                s.update(&data[split..len]).unwrap();
+                assert_eq!(
+                    s.finish().unwrap().to_vec(),
+                    want,
+                    "len {len} split {split}"
+                );
+            }
+            let mut bytewise = Sha256Stream::new().unwrap();
+            for b in &data[..len] {
+                bytewise.update(std::slice::from_ref(b)).unwrap();
+            }
+            assert_eq!(
+                bytewise.finish().unwrap().to_vec(),
+                want,
+                "len {len} byte by byte"
+            );
+        }
+        // finish resets the stream for the next input.
+        let mut s = Sha256Stream::new().unwrap();
+        s.update(b"first").unwrap();
+        s.finish().unwrap();
+        s.update(b"abc").unwrap();
+        assert_eq!(s.finish().unwrap().to_vec(), sha256(b"abc").unwrap());
+    }
+
+    /// 100 MB in 1 MiB and odd-sized pieces, as a large attachment arrives.
+    #[test]
+    fn sha256_stream_100_mb() {
+        let total = 100 * 1024 * 1024;
+        let data: Vec<u8> = (0..total).map(|i| (i % 251) as u8).collect();
+        let want = sha256(&data).unwrap();
+        for chunk in [1 << 20, 65_537] {
+            let mut s = Sha256Stream::new().unwrap();
+            for piece in data.chunks(chunk) {
+                s.update(piece).unwrap();
+            }
+            assert_eq!(s.finish().unwrap().to_vec(), want, "chunk {chunk}");
+        }
+    }
 
     #[test]
     fn sha256_abc() {
@@ -657,8 +787,11 @@ mod tests {
         let ec = EcKey::generate(&group).unwrap();
         let key = PKey::from_ec_key(ec.clone()).unwrap();
         let spki = key.public_key_to_der().unwrap();
-        let sig = EcdsaSig::sign(&openssl::hash::hash(MessageDigest::sha256(), b"jwt").unwrap(), &ec)
-            .unwrap();
+        let sig = EcdsaSig::sign(
+            &openssl::hash::hash(MessageDigest::sha256(), b"jwt").unwrap(),
+            &ec,
+        )
+        .unwrap();
         let der = sig.to_der().unwrap();
         assert!(ecdsa_verify(3, &spki, b"jwt", &der, false).unwrap());
         let mut raw = sig.r().to_vec_padded(32).unwrap();
@@ -697,8 +830,166 @@ mod tests {
             assert!(ok, "kind {kind}");
             let csr = csr_create(&pkcs8, "CN=device,O=Example").unwrap();
             let req = openssl::x509::X509Req::from_der(&csr).unwrap();
-            assert!(req.verify(&req.public_key().unwrap()).unwrap(), "csr {kind}");
+            assert!(
+                req.verify(&req.public_key().unwrap()).unwrap(),
+                "csr {kind}"
+            );
         }
+    }
+
+    /// The hand-built encoder this replaced (kept here only to prove that
+    /// blobs stored before R9 still decrypt).
+    fn legacy_pkcs8_encrypt(pkcs8: &[u8], passphrase: &[u8], iterations: u32) -> Vec<u8> {
+        fn der(tag: u8, content: &[u8]) -> Vec<u8> {
+            let mut out = vec![tag];
+            let n = content.len();
+            if n < 0x80 {
+                out.push(n as u8);
+            } else if n < 0x100 {
+                out.extend([0x81, n as u8]);
+            } else {
+                out.extend([0x82, (n >> 8) as u8, n as u8]);
+            }
+            out.extend_from_slice(content);
+            out
+        }
+        let salt = random(16).unwrap();
+        let iv = random(16).unwrap();
+        let key = pbkdf2_hmac_sha256(passphrase, &salt, iterations as usize, 32).unwrap();
+        let encrypted = aes_cbc_encrypt(&key, &iv, pkcs8).unwrap();
+        let mut iter = iterations.to_be_bytes().to_vec();
+        while iter.len() > 1 && iter[0] == 0 && iter[1] & 0x80 == 0 {
+            iter.remove(0);
+        }
+        let prf = der(
+            0x30,
+            &[
+                der(0x06, &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x02, 0x09]),
+                vec![0x05, 0x00],
+            ]
+            .concat(),
+        );
+        let kdf_params = der(0x30, &[der(0x04, &salt), der(0x02, &iter), prf].concat());
+        let kdf = der(
+            0x30,
+            &[
+                der(
+                    0x06,
+                    &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0C],
+                ),
+                kdf_params,
+            ]
+            .concat(),
+        );
+        let scheme = der(
+            0x30,
+            &[
+                der(
+                    0x06,
+                    &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2A],
+                ),
+                der(0x04, &iv),
+            ]
+            .concat(),
+        );
+        let pbes2 = der(
+            0x30,
+            &[
+                der(
+                    0x06,
+                    &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0D],
+                ),
+                der(0x30, &[kdf, scheme].concat()),
+            ]
+            .concat(),
+        );
+        der(0x30, &[pbes2, der(0x04, &encrypted)].concat())
+    }
+
+    #[test]
+    fn pkcs8_old_and_new_blobs_decrypt() {
+        for kind in [1, 2, 4] {
+            let (pkcs8, _) = pkey_generate(kind).unwrap();
+            for blob in [
+                pkcs8_encrypt(&pkcs8, b"pass", 2048).unwrap(),
+                legacy_pkcs8_encrypt(&pkcs8, b"pass", 2048),
+            ] {
+                assert_eq!(pkcs8_decrypt(&blob, b"pass").unwrap(), pkcs8, "kind {kind}");
+                assert!(pkcs8_decrypt(&blob, b"wrong").is_err());
+            }
+        }
+    }
+
+    /// The new blob says PBES2 / PBKDF2 (salt 16, the iteration count,
+    /// hmacWithSHA256) / AES-256-CBC (IV 16), as before.
+    #[test]
+    fn pkcs8_parameters_are_unchanged() {
+        let (pkcs8, _) = pkey_generate(1).unwrap();
+        let blob = pkcs8_encrypt(&pkcs8, b"pass", 300_000).unwrap();
+        let hex: String = blob.iter().map(|b| format!("{b:02x}")).collect();
+        for (what, needle) in [
+            ("PBES2", "06092a864886f70d01050d"),
+            ("PBKDF2", "06092a864886f70d01050c"),
+            ("hmacWithSHA256", "06082a864886f70d0209"),
+            ("aes-256-cbc", "060960864801650304012a"),
+            ("iterations 300000", "02030493e0"),
+        ] {
+            assert!(hex.contains(needle), "{what} missing in {hex}");
+        }
+        // Salt and IV are fresh each time.
+        assert_ne!(blob, pkcs8_encrypt(&pkcs8, b"pass", 300_000).unwrap());
+    }
+
+    #[test]
+    fn pkcs8_encrypt_refuses_bad_input() {
+        let (pkcs8, _) = pkey_generate(1).unwrap();
+        assert!(pkcs8_encrypt(&pkcs8, b"p", 0).is_err());
+        assert!(pkcs8_encrypt(&pkcs8, b"p", u32::MAX).is_err());
+        assert!(pkcs8_encrypt(b"not a key", b"p", 1000).is_err());
+        let mut trailing = pkcs8.clone();
+        trailing.push(0);
+        assert!(pkcs8_encrypt(&trailing, b"p", 1000).is_err());
+    }
+
+    /// `openssl pkcs8` reads the new output (R9 interop).
+    #[test]
+    fn openssl_cli_reads_the_new_blob() {
+        let bin = std::env::var("SCOMM_OPENSSL_CLI").unwrap_or_else(|_| "openssl".into());
+        if std::process::Command::new(&bin)
+            .arg("version")
+            .output()
+            .is_err()
+        {
+            println!("skipped: {bin} not usable here");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("scomm-pkcs8-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (pkcs8, _) = pkey_generate(1).unwrap();
+        let input = dir.join("enc.der");
+        std::fs::write(&input, pkcs8_encrypt(&pkcs8, b"cli pass", 2048).unwrap()).unwrap();
+        let out = dir.join("plain.der");
+        let r = std::process::Command::new(&bin)
+            .args([
+                "pkcs8",
+                "-inform",
+                "DER",
+                "-outform",
+                "DER",
+                "-passin",
+                "pass:cli pass",
+                "-in",
+            ])
+            .arg(&input)
+            .arg("-out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        // The CLI writes the traditional (SEC1) encoding; compare the key.
+        let read = PKey::private_key_from_der(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(read.private_key_to_pkcs8().unwrap(), pkcs8);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

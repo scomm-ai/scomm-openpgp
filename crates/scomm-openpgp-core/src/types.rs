@@ -166,8 +166,14 @@ pub enum SignatureValidity {
 #[derive(Clone, Debug)]
 pub struct VerificationResult {
     pub validity: SignatureValidity,
+    /// The (sub)key that made the signature.
     pub signer_fingerprint: Option<OpenPgpFingerprint>,
     pub signer_key_id: Option<OpenPgpKeyId>,
+    /// The certificate's primary key: what pins are keyed by, so subkey
+    /// rotation under one primary is not a key change.
+    pub signer_primary_fingerprint: Option<OpenPgpFingerprint>,
+    /// See [SignatureInfo::weak_algorithm].
+    pub weak_algorithm: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +199,9 @@ pub struct SignatureInfo {
     pub key_id: Option<OpenPgpKeyId>,
     pub validity: SignatureValidity,
     pub created_at: Option<i64>,
+    /// Valid only under the permissive decrypt policy (for example SHA-1),
+    /// not under the current one (N1). Never a source of trust.
+    pub weak_algorithm: bool,
 }
 
 #[derive(Clone, Debug)]

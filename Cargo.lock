@@ -1148,6 +1148,7 @@ name = "scomm-openpgp-sequoia"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "openssl",
  "openssl-sys",
  "scomm-openpgp-core",
  "sequoia-openpgp",

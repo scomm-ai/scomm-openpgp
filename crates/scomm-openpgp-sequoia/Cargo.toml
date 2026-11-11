@@ -11,3 +11,6 @@ scomm-openpgp-core.workspace = true
 sequoia-openpgp = { workspace = true, default-features = false, features = ["crypto-openssl", "compression"] }
 anyhow = "1"
 openssl-sys = { version = "0.9.114", features = ["vendored"] }
+
+[dev-dependencies]
+openssl.workspace = true
