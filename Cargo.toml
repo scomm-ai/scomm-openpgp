@@ -24,5 +24,8 @@ openssl-src = { git = "https://github.com/advforks/openssl-src-rs", rev = "18838
 [profile.release]
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+# Unwind, not abort: Sequoia 2.4.1 panics on some truncated messages
+# (parse.rs, SEIPDv1 set-up), and only unwinding lets the FFI's
+# catch_unwind turn that into an error instead of killing the app.
+panic = "unwind"
 strip = "symbols"

@@ -500,6 +500,10 @@ pub fn aes256gcm_decrypt(
     ciphertext: &[u8],
     tag: &[u8],
 ) -> Result<Vec<u8>, String> {
+    // OpenSSL accepts tags as short as 1 byte; ours are always 16 (audit F4).
+    if tag.len() != 16 {
+        return Err("aes-gcm tag".to_string());
+    }
     let mut crypter = Crypter::new(Cipher::aes_256_gcm(), Mode::Decrypt, key, Some(nonce))
         .map_err(|e| e.to_string())?;
     crypter.pad(false);
@@ -732,6 +736,10 @@ mod tests {
         let mut bad = tag;
         bad[0] ^= 1;
         assert!(aes256gcm_decrypt(&key, &nonce, b"", &empty, &bad).is_err());
+        // A truncated (yet correct-prefix) tag is refused, not checked short.
+        for n in [1, 4, 8, 12, 15] {
+            assert!(aes256gcm_decrypt(&key, &nonce, b"", &empty, &tag[..n]).is_err());
+        }
     }
 
     #[test]
