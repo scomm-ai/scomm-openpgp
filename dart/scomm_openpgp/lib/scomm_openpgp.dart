@@ -2,6 +2,7 @@ library scomm_openpgp;
 
 export 'src/prims_native.dart'
     show
+        NativeSha256,
         nativeAes256GcmDecrypt,
         nativeAes256GcmEncrypt,
         nativeArgon2id,

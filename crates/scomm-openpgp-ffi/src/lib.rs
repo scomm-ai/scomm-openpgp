@@ -130,7 +130,9 @@ fn parse_recipients(buf: &[u8]) -> Result<Vec<Vec<u8>>> {
         let len = u32::from_be_bytes(buf[i..i + 4].try_into().unwrap()) as usize;
         i += 4;
         if i + len > buf.len() {
-            return Err(OpenPgpError::InvalidArgument("truncated recipient key".into()));
+            return Err(OpenPgpError::InvalidArgument(
+                "truncated recipient key".into(),
+            ));
         }
         out.push(buf[i..i + len].to_vec());
         i += len;
@@ -163,10 +165,7 @@ pub unsafe extern "C" fn scomm_openpgp_buffer_free(ptr: *mut u8, len: usize) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn scomm_openpgp_last_error(
-    out: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
+pub unsafe extern "C" fn scomm_openpgp_last_error(out: *mut *mut u8, out_len: *mut usize) -> i32 {
     let msg = LAST_ERROR.with(|slot| slot.borrow().clone().unwrap_or_default());
     write_buf(msg.as_bytes(), out, out_len);
     0
@@ -237,7 +236,11 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
         unsafe {
             write_buf(&generated.public, public_out, public_len);
             write_buf(&generated.secret, secret_out, secret_len);
-            write_buf(key_info_json(&generated.info).as_bytes(), json_out, json_len);
+            write_buf(
+                key_info_json(&generated.info).as_bytes(),
+                json_out,
+                json_len,
+            );
         }
         Ok(0)
     })
@@ -397,6 +400,49 @@ pub unsafe extern "C" fn scomm_openpgp_verify(
     })
 }
 
+/// Detached verification as JSON: `validity` (valid, invalid,
+/// unknown-signer, malformed, unsupported), `signer_fingerprint`,
+/// `signer_primary_fingerprint` (what pins use), `signer_key_id` (hex) and
+/// `weak_algorithm`. Additive; [scomm_openpgp_verify] is unchanged.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_verify_detached(
+    data: *const u8,
+    data_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+    public_key: *const u8,
+    public_key_len: usize,
+    json_out: *mut *mut u8,
+    json_len: *mut usize,
+) -> i32 {
+    let data = read_slice(data, data_len).to_vec();
+    let signature = read_slice(signature, signature_len).to_vec();
+    let public_key = read_slice(public_key, public_key_len).to_vec();
+    *json_out = ptr::null_mut();
+    *json_len = 0;
+    run(|| {
+        clear_error();
+        let v = engine().verify(&data, &signature, &public_key)?;
+        let validity = match v.validity {
+            SignatureValidity::CryptographicallyValid => "valid",
+            SignatureValidity::CryptographicallyInvalid => "invalid",
+            SignatureValidity::UnknownSigner => "unknown-signer",
+            SignatureValidity::MalformedSignature => "malformed",
+            SignatureValidity::UnsupportedAlgorithm => "unsupported",
+        };
+        let text = json!({
+            "validity": validity,
+            "signer_fingerprint": v.signer_fingerprint.map(|f| f.to_hex()),
+            "signer_primary_fingerprint": v.signer_primary_fingerprint.map(|f| f.to_hex()),
+            "signer_key_id": v.signer_key_id.map(|k| k.to_hex()),
+            "weak_algorithm": v.weak_algorithm,
+        })
+        .to_string();
+        unsafe { write_buf(text.as_bytes(), json_out, json_len) };
+        Ok(0)
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn scomm_openpgp_test_passphrase(
     private_key: *const u8,
@@ -470,7 +516,11 @@ pub unsafe extern "C" fn scomm_openpgp_sign_pop(
     })
 }
 
-fn prim_out(result: std::result::Result<Vec<u8>, String>, out: *mut *mut u8, out_len: *mut usize) -> i32 {
+fn prim_out(
+    result: std::result::Result<Vec<u8>, String>,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
     match result {
         Ok(bytes) => {
             clear_error();
@@ -481,6 +531,72 @@ fn prim_out(result: std::result::Result<Vec<u8>, String>, out: *mut *mut u8, out
             set_error(err);
             -1
         }
+    }
+}
+
+/// Opaque streaming SHA-256 context (R11); null on failure. Free it with
+/// [scomm_prims_sha256_free].
+#[no_mangle]
+pub extern "C" fn scomm_prims_sha256_new() -> *mut prims::Sha256Stream {
+    match prims::Sha256Stream::new() {
+        Ok(s) => Box::into_raw(Box::new(s)),
+        Err(e) => {
+            set_error(e);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_sha256_update(
+    ctx: *mut prims::Sha256Stream,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
+    let Some(ctx) = ctx.as_mut() else {
+        set_error("sha256 context".into());
+        return -1;
+    };
+    match ctx.update(read_slice(data, data_len)) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_error(e);
+            -1
+        }
+    }
+}
+
+/// Writes the 32-byte digest to `out` and resets the context.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_sha256_final(
+    ctx: *mut prims::Sha256Stream,
+    out: *mut u8,
+) -> i32 {
+    let Some(ctx) = ctx.as_mut() else {
+        set_error("sha256 context".into());
+        return -1;
+    };
+    if out.is_null() {
+        set_error("sha256 output".into());
+        return -1;
+    }
+    match ctx.finish() {
+        Ok(d) => {
+            ptr::copy_nonoverlapping(d.as_ptr(), out, d.len());
+            0
+        }
+        Err(e) => {
+            set_error(e);
+            -1
+        }
+    }
+}
+
+/// Frees a context from [scomm_prims_sha256_new]; null is ignored.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_prims_sha256_free(ctx: *mut prims::Sha256Stream) {
+    if !ctx.is_null() {
+        drop(Box::from_raw(ctx));
     }
 }
 
@@ -708,7 +824,11 @@ pub unsafe extern "C" fn scomm_prims_x25519_public(
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
-    prim_out(prims::x25519_public(read_slice(seed, seed_len)), out, out_len)
+    prim_out(
+        prims::x25519_public(read_slice(seed, seed_len)),
+        out,
+        out_len,
+    )
 }
 
 #[no_mangle]
@@ -965,7 +1085,13 @@ pub unsafe extern "C" fn scomm_prims_pkey_generate(
     spki_out: *mut *mut u8,
     spki_len: *mut usize,
 ) -> i32 {
-    write_pair(prims::pkey_generate(kind), pkcs8_out, pkcs8_len, spki_out, spki_len)
+    write_pair(
+        prims::pkey_generate(kind),
+        pkcs8_out,
+        pkcs8_len,
+        spki_out,
+        spki_len,
+    )
 }
 
 #[no_mangle]
@@ -998,7 +1124,11 @@ pub unsafe extern "C" fn scomm_prims_pkey_sign(
     out_len: *mut usize,
 ) -> i32 {
     prim_out(
-        prims::pkey_sign(scheme, read_slice(pkcs8, pkcs8_len), read_slice(message, message_len)),
+        prims::pkey_sign(
+            scheme,
+            read_slice(pkcs8, pkcs8_len),
+            read_slice(message, message_len),
+        ),
         out,
         out_len,
     )
@@ -1068,7 +1198,11 @@ pub unsafe extern "C" fn scomm_prims_pkcs8_public_spki(
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
-    prim_out(prims::pkcs8_public_spki(read_slice(pkcs8, pkcs8_len)), out, out_len)
+    prim_out(
+        prims::pkcs8_public_spki(read_slice(pkcs8, pkcs8_len)),
+        out,
+        out_len,
+    )
 }
 
 #[cfg(test)]
@@ -1077,5 +1211,39 @@ mod tests {
     fn links_openssl_4_1() {
         let version = crate::prims::openssl_version();
         assert!(version.starts_with("OpenSSL 4.1."), "{version}");
+    }
+
+    /// The C ABI of the streaming digest: chunks, reuse after final, and
+    /// refusal of a null context or output.
+    #[test]
+    fn sha256_stream_c_abi() {
+        use super::*;
+        unsafe {
+            let ctx = scomm_prims_sha256_new();
+            assert!(!ctx.is_null());
+            for chunk in [&b"a"[..], b"", b"bc"] {
+                assert_eq!(
+                    scomm_prims_sha256_update(ctx, chunk.as_ptr(), chunk.len()),
+                    0
+                );
+            }
+            let mut out = [0u8; 32];
+            assert_eq!(scomm_prims_sha256_final(ctx, out.as_mut_ptr()), 0);
+            assert_eq!(out.to_vec(), crate::prims::sha256(b"abc").unwrap());
+            assert_eq!(scomm_prims_sha256_update(ctx, ptr::null(), 0), 0);
+            assert_eq!(scomm_prims_sha256_final(ctx, out.as_mut_ptr()), 0);
+            assert_eq!(out.to_vec(), crate::prims::sha256(b"").unwrap());
+            assert_eq!(scomm_prims_sha256_final(ctx, ptr::null_mut()), -1);
+            scomm_prims_sha256_free(ctx);
+            assert_eq!(
+                scomm_prims_sha256_update(ptr::null_mut(), b"x".as_ptr(), 1),
+                -1
+            );
+            assert_eq!(
+                scomm_prims_sha256_final(ptr::null_mut(), out.as_mut_ptr()),
+                -1
+            );
+            scomm_prims_sha256_free(ptr::null_mut());
+        }
     }
 }

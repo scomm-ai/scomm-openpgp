@@ -560,6 +560,72 @@ class ScommOpenPgp {
     });
   }
 
+  /// Looked up on first use, so older native libraries without it still
+  /// load; calling it against one throws.
+  late final int Function(
+    ffi.Pointer<ffi.Uint8>,
+    int,
+    ffi.Pointer<ffi.Uint8>,
+    int,
+    ffi.Pointer<ffi.Uint8>,
+    int,
+    ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+    ffi.Pointer<ffi.Size>,
+  ) _verifyVerdict = _lib.lookupFunction<
+      ffi.Int32 Function(
+        ffi.Pointer<ffi.Uint8>,
+        ffi.Size,
+        ffi.Pointer<ffi.Uint8>,
+        ffi.Size,
+        ffi.Pointer<ffi.Uint8>,
+        ffi.Size,
+        ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+        ffi.Pointer<ffi.Size>,
+      ),
+      int Function(
+        ffi.Pointer<ffi.Uint8>,
+        int,
+        ffi.Pointer<ffi.Uint8>,
+        int,
+        ffi.Pointer<ffi.Uint8>,
+        int,
+        ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+        ffi.Pointer<ffi.Size>,
+      )>('scomm_openpgp_verify_detached');
+
+  /// [verifyDetached] with the signer's primary fingerprint and the weak
+  /// flag (N1).
+  OpenPgpSignatureVerdict verifyDetachedVerdict({
+    required List<int> data,
+    required List<int> signature,
+    required List<int> publicKey,
+  }) {
+    return using((arena) {
+      final d = _copy(arena, data);
+      final sig = _copy(arena, signature);
+      final pk = _copy(arena, publicKey);
+      final outPtr = arena<ffi.Pointer<ffi.Uint8>>();
+      final outLen = arena<ffi.Size>();
+      final code = _verifyVerdict(
+        d.ptr,
+        d.len,
+        sig.ptr,
+        sig.len,
+        pk.ptr,
+        pk.len,
+        outPtr,
+        outLen,
+      );
+      if (code != 0) {
+        throw ScommOpenPgpException(code, _readLastError());
+      }
+      return OpenPgpSignatureVerdict.fromJson(
+        jsonDecode(utf8.decode(_take(outPtr.value, outLen.value)))
+            as Map<String, dynamic>,
+      );
+    });
+  }
+
   void testPassphrase({
     required List<int> privateKey,
     String passphrase = '',

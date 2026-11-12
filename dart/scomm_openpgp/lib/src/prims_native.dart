@@ -51,6 +51,82 @@ external int _sha512(
   Pointer<Size> outLen,
 );
 
+@Native<Pointer<Void> Function()>(symbol: 'scomm_prims_sha256_new')
+external Pointer<Void> _sha256New();
+
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Size)>(
+  symbol: 'scomm_prims_sha256_update',
+  isLeaf: true,
+)
+external int _sha256Update(Pointer<Void> ctx, Pointer<Uint8> data, int len);
+
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>)>(
+  symbol: 'scomm_prims_sha256_final',
+  isLeaf: true,
+)
+external int _sha256Final(Pointer<Void> ctx, Pointer<Uint8> out);
+
+@Native<Void Function(Pointer<Void>)>(symbol: 'scomm_prims_sha256_free')
+external void _sha256Free(Pointer<Void> ctx);
+
+final _sha256Finalizer = NativeFinalizer(
+  Native.addressOf<NativeFunction<Void Function(Pointer<Void>)>>(_sha256Free),
+);
+
+/// Streaming SHA-256 on one native OpenSSL context (R11). Feed chunks with
+/// [add] and call [close] once; an abandoned stream is freed by a
+/// [NativeFinalizer].
+final class NativeSha256 implements Finalizable {
+  NativeSha256() : _ctx = _open() {
+    _sha256Finalizer.attach(this, _ctx, detach: this);
+  }
+
+  static Pointer<Void> _open() {
+    ScommOpenPgp.instance;
+    final ctx = _sha256New();
+    if (ctx == nullptr) {
+      throw StateError('scomm_prims_sha256_new');
+    }
+    return ctx;
+  }
+
+  final Pointer<Void> _ctx;
+  bool _closed = false;
+
+  void add(List<int> chunk) {
+    if (_closed) {
+      throw StateError('NativeSha256 is closed');
+    }
+    if (chunk.isEmpty) return;
+    using((arena) {
+      final input = _bytes(arena, chunk);
+      if (_sha256Update(_ctx, input.$1, input.$2) != 0) {
+        throw StateError('scomm_prims_sha256_update');
+      }
+    });
+  }
+
+  /// The 32-byte digest. The native context is released here.
+  Uint8List close() {
+    if (_closed) {
+      throw StateError('NativeSha256 is closed');
+    }
+    _closed = true;
+    try {
+      return using((arena) {
+        final out = arena<Uint8>(32);
+        if (_sha256Final(_ctx, out) != 0) {
+          throw StateError('scomm_prims_sha256_final');
+        }
+        return Uint8List.fromList(out.asTypedList(32));
+      });
+    } finally {
+      _sha256Finalizer.detach(this);
+      _sha256Free(_ctx);
+    }
+  }
+}
+
 Uint8List nativeSha512(List<int> data) {
   ScommOpenPgp.instance;
   return using((arena) {

@@ -1,5 +1,6 @@
 use std::io::{self, Read};
 
+use scomm_openpgp_core::*;
 use sequoia_openpgp::crypto::Password;
 use sequoia_openpgp::parse::stream::{
     DecryptionHelper, DecryptorBuilder, DetachedVerifierBuilder, MessageLayer, MessageStructure,
@@ -8,7 +9,6 @@ use sequoia_openpgp::parse::stream::{
 use sequoia_openpgp::parse::Parse;
 use sequoia_openpgp::types::SymmetricAlgorithm;
 use sequoia_openpgp::Cert;
-use scomm_openpgp_core::*;
 
 use crate::{
     decrypt_policy, fingerprint_of, generate_policy, key_id_of, parse_cert, reject_librepgp,
@@ -56,6 +56,31 @@ impl Helper {
     }
 }
 
+/// N1: a signature that verified under the permissive decrypt policy is
+/// weak unless it also holds under the current policy: its hash for
+/// collision resistance, and the signer key and its binding at the time it
+/// signed.
+fn is_weak(good: &sequoia_openpgp::parse::stream::GoodChecksum<'_>) -> bool {
+    use sequoia_openpgp::policy::{HashAlgoSecurity, Policy};
+    let strict = generate_policy();
+    if strict
+        .signature(good.sig, HashAlgoSecurity::CollisionResistance)
+        .is_err()
+    {
+        return true;
+    }
+    let when = good.sig.signature_creation_time();
+    let fp = good.ka.key().fingerprint();
+    let Ok(valid) = good.ka.cert().with_policy(&strict, when) else {
+        return true;
+    };
+    !valid
+        .keys()
+        .key_handle(fp)
+        .for_signing()
+        .any(|ka| strict.key(&ka).is_ok())
+}
+
 impl VerificationHelper for Helper {
     fn get_certs(
         &mut self,
@@ -75,6 +100,7 @@ impl VerificationHelper for Helper {
                                 key_id: Some(key_id_of(&good.ka.key().keyid())),
                                 validity: SignatureValidity::CryptographicallyValid,
                                 created_at: None,
+                                weak_algorithm: is_weak(&good),
                             });
                         }
                         Err(_) => {
@@ -83,6 +109,7 @@ impl VerificationHelper for Helper {
                                 key_id: None,
                                 validity: SignatureValidity::CryptographicallyInvalid,
                                 created_at: None,
+                                weak_algorithm: false,
                             });
                         }
                     }
@@ -99,7 +126,10 @@ impl DecryptionHelper for Helper {
         pkesks: &[sequoia_openpgp::packet::PKESK],
         _skesks: &[sequoia_openpgp::packet::SKESK],
         sym_algo: Option<SymmetricAlgorithm>,
-        decrypt: &mut dyn FnMut(Option<SymmetricAlgorithm>, &sequoia_openpgp::crypto::SessionKey) -> bool,
+        decrypt: &mut dyn FnMut(
+            Option<SymmetricAlgorithm>,
+            &sequoia_openpgp::crypto::SessionKey,
+        ) -> bool,
     ) -> sequoia_openpgp::Result<Option<Cert>> {
         let p = decrypt_policy();
         for ka in self
@@ -181,6 +211,8 @@ struct VerifyHelper {
     validity: SignatureValidity,
     fingerprint: Option<OpenPgpFingerprint>,
     key_id: Option<OpenPgpKeyId>,
+    primary: Option<OpenPgpFingerprint>,
+    weak: bool,
 }
 
 impl VerificationHelper for VerifyHelper {
@@ -204,6 +236,8 @@ impl VerificationHelper for VerifyHelper {
                             self.validity = SignatureValidity::CryptographicallyValid;
                             self.fingerprint = Some(fingerprint_of(good.ka.key().fingerprint()));
                             self.key_id = Some(key_id_of(&good.ka.key().keyid()));
+                            self.primary = Some(fingerprint_of(good.ka.cert().fingerprint()));
+                            self.weak = is_weak(&good);
                         }
                         Err(_) => {
                             if self.validity != SignatureValidity::CryptographicallyValid {
@@ -230,7 +264,11 @@ pub fn verify_detached(
         validity: SignatureValidity::UnknownSigner,
         fingerprint: None,
         key_id: None,
+        primary: None,
+        weak: false,
     };
+    // Detached PGP/MIME signatures are checked under the current policy
+    // (N1), so a SHA-1 signature does not verify here.
     let p = generate_policy();
     let mut verifier = DetachedVerifierBuilder::from_bytes(signature)
         .map_err(|_| OpenPgpError::MalformedMessage)?
@@ -244,6 +282,8 @@ pub fn verify_detached(
         validity: helper.validity,
         signer_fingerprint: helper.fingerprint,
         signer_key_id: helper.key_id,
+        signer_primary_fingerprint: helper.primary,
+        weak_algorithm: helper.weak,
     })
 }
 
