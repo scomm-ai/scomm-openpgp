@@ -376,7 +376,7 @@ fn encrypt_message(
         .collect::<Result<Vec<_>>>()?;
 
     let mut recipients = Vec::new();
-    for cert in &certs {
+    for (index, cert) in certs.iter().enumerate() {
         let keys: Vec<_> = cert
             .keys()
             .with_policy(&p, None)
@@ -385,6 +385,14 @@ fn encrypt_message(
             .revoked(false)
             .for_transport_encryption()
             .collect();
+        // Every certificate must contribute a key. Skipping one would send a
+        // message that recipient can never open while reporting success.
+        if keys.is_empty() {
+            return Err(OpenPgpError::RecipientWithoutEncryptionKey {
+                index,
+                fingerprint: cert.fingerprint().to_hex(),
+            });
+        }
         let pq: Vec<_> = keys
             .iter()
             .filter(|ka| {
@@ -399,10 +407,6 @@ fn encrypt_message(
             recipients.extend(pq);
         }
     }
-    if recipients.is_empty() {
-        return Err(OpenPgpError::NoSuitableEncryptionKey);
-    }
-
     let mut sink = Vec::new();
     {
         let message = Message::new(&mut sink);

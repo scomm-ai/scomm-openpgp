@@ -9,6 +9,14 @@ pub enum OpenPgpError {
     KeyRevoked,
     UnsupportedAlgorithm(String),
     NoSuitableEncryptionKey,
+    /// Recipient certificate `index` (0-based, in the order given) has no
+    /// supported, live, non-revoked encryption key. `fingerprint` is its
+    /// primary fingerprint in upper-case hex. Same code as
+    /// [`Self::NoSuitableEncryptionKey`] so older callers still fail closed.
+    RecipientWithoutEncryptionKey {
+        index: usize,
+        fingerprint: String,
+    },
     NoSuitableSigningKey,
     BadSignature,
     DecryptionFailed,
@@ -27,7 +35,7 @@ impl OpenPgpError {
             Self::KeyExpired => 3,
             Self::KeyRevoked => 4,
             Self::UnsupportedAlgorithm(_) => 5,
-            Self::NoSuitableEncryptionKey => 6,
+            Self::NoSuitableEncryptionKey | Self::RecipientWithoutEncryptionKey { .. } => 6,
             Self::NoSuitableSigningKey => 7,
             Self::BadSignature => 8,
             Self::DecryptionFailed => 9,
@@ -49,6 +57,11 @@ impl fmt::Display for OpenPgpError {
             Self::KeyRevoked => write!(f, "key revoked"),
             Self::UnsupportedAlgorithm(m) => write!(f, "unsupported algorithm: {m}"),
             Self::NoSuitableEncryptionKey => write!(f, "no suitable encryption key"),
+            // Callers parse this text: keep the format stable.
+            Self::RecipientWithoutEncryptionKey { index, fingerprint } => write!(
+                f,
+                "no suitable encryption key for recipient {index} ({fingerprint})"
+            ),
             Self::NoSuitableSigningKey => write!(f, "no suitable signing key"),
             Self::BadSignature => write!(f, "bad signature"),
             Self::DecryptionFailed => write!(f, "decryption failed"),
