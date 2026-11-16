@@ -1037,7 +1037,7 @@ dependencies = [
 [[package]]
 name = "scomm-smime-cms"
 version = "0.1.0"
-source = "git+https://github.com/scomm-ai/scomm-smime?rev=56c481d494244186e852ebac833b8d6ea040f144#56c481d494244186e852ebac833b8d6ea040f144"
+source = "git+https://github.com/scomm-ai/scomm-smime?rev=daf590692c53761ac2397d6310042a6d4db0e398#daf590692c53761ac2397d6310042a6d4db0e398"
 dependencies = [
  "base64",
  "foreign-types",
@@ -1054,12 +1054,12 @@ dependencies = [
 [[package]]
 name = "scomm-smime-core"
 version = "0.1.0"
-source = "git+https://github.com/scomm-ai/scomm-smime?rev=56c481d494244186e852ebac833b8d6ea040f144#56c481d494244186e852ebac833b8d6ea040f144"
+source = "git+https://github.com/scomm-ai/scomm-smime?rev=daf590692c53761ac2397d6310042a6d4db0e398#daf590692c53761ac2397d6310042a6d4db0e398"
 
 [[package]]
 name = "scomm-smime-ffi"
 version = "0.1.0"
-source = "git+https://github.com/scomm-ai/scomm-smime?rev=56c481d494244186e852ebac833b8d6ea040f144#56c481d494244186e852ebac833b8d6ea040f144"
+source = "git+https://github.com/scomm-ai/scomm-smime?rev=daf590692c53761ac2397d6310042a6d4db0e398#daf590692c53761ac2397d6310042a6d4db0e398"
 dependencies = [
  "scomm-smime-cms",
  "scomm-smime-core",

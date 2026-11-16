@@ -22,6 +22,8 @@ use scomm_openpgp_core::*;
 
 mod decrypt;
 mod inspect;
+pub use decrypt::{decrypt, verify_detached_with_details};
+pub use inspect::{inspect_public_envelope, PublicEnvelope, PublicPacket};
 mod policy;
 mod pop;
 

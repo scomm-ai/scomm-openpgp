@@ -34,6 +34,9 @@ pub struct DecryptOutcome {
     pub plaintext: Vec<u8>,
     pub recipient_key_id: Option<OpenPgpKeyId>,
     pub signatures: Vec<SignatureInfo>,
+    pub cipher: Option<u8>,
+    pub aead: Option<u8>,
+    pub recipient_algorithm: Option<u8>,
 }
 
 struct Helper {
@@ -42,6 +45,9 @@ struct Helper {
     signers: Vec<Cert>,
     recipient_key_id: Option<OpenPgpKeyId>,
     signatures: Vec<SignatureInfo>,
+    cipher: Option<u8>,
+    aead: Option<u8>,
+    recipient_algorithm: Option<u8>,
 }
 
 impl Helper {
@@ -52,6 +58,9 @@ impl Helper {
             signers,
             recipient_key_id: None,
             signatures: Vec::new(),
+            cipher: None,
+            aead: None,
+            recipient_algorithm: None,
         }
     }
 }
@@ -91,6 +100,16 @@ impl VerificationHelper for Helper {
 
     fn check(&mut self, structure: MessageStructure) -> sequoia_openpgp::Result<()> {
         for layer in structure.into_iter() {
+            if self.cipher.is_none() {
+                if let MessageLayer::Encryption {
+                    sym_algo,
+                    aead_algo,
+                } = &layer
+                {
+                    self.cipher = Some(u8::from(*sym_algo));
+                    self.aead = aead_algo.map(u8::from);
+                }
+            }
             if let MessageLayer::SignatureGroup { results } = layer {
                 for r in results {
                     match r {
@@ -158,6 +177,7 @@ impl DecryptionHelper for Helper {
                     .map(|(algo, sk)| decrypt(algo, &sk))
                     .unwrap_or(false)
                 {
+                    self.recipient_algorithm = Some(u8::from(pkesk.pk_algo()));
                     self.recipient_key_id = Some(key_id_of(&ka.key().keyid()));
                     return Ok(Some(self.secret.clone()));
                 }
@@ -203,6 +223,9 @@ pub fn decrypt(
         plaintext,
         recipient_key_id: helper.recipient_key_id,
         signatures: helper.signatures,
+        cipher: helper.cipher,
+        aead: helper.aead,
+        recipient_algorithm: helper.recipient_algorithm,
     })
 }
 
@@ -213,6 +236,7 @@ struct VerifyHelper {
     key_id: Option<OpenPgpKeyId>,
     primary: Option<OpenPgpFingerprint>,
     weak: bool,
+    algorithms: Option<(u8, u8, u8)>,
 }
 
 impl VerificationHelper for VerifyHelper {
@@ -238,6 +262,11 @@ impl VerificationHelper for VerifyHelper {
                             self.key_id = Some(key_id_of(&good.ka.key().keyid()));
                             self.primary = Some(fingerprint_of(good.ka.cert().fingerprint()));
                             self.weak = is_weak(&good);
+                            self.algorithms = Some((
+                                good.sig.version(),
+                                u8::from(good.sig.pk_algo()),
+                                u8::from(good.sig.hash_algo()),
+                            ));
                         }
                         Err(_) => {
                             if self.validity != SignatureValidity::CryptographicallyValid {
@@ -257,6 +286,14 @@ pub fn verify_detached(
     signature: &[u8],
     public_key: &[u8],
 ) -> Result<VerificationResult> {
+    verify_detached_with_details(data, signature, public_key).map(|(verdict, _)| verdict)
+}
+
+pub fn verify_detached_with_details(
+    data: &[u8],
+    signature: &[u8],
+    public_key: &[u8],
+) -> Result<(VerificationResult, Option<(u8, u8, u8)>)> {
     let cert = parse_cert(public_key)?;
     reject_librepgp(&cert)?;
     let helper = VerifyHelper {
@@ -266,6 +303,7 @@ pub fn verify_detached(
         key_id: None,
         primary: None,
         weak: false,
+        algorithms: None,
     };
     // Detached PGP/MIME signatures are checked under the current policy
     // (N1), so a SHA-1 signature does not verify here.
@@ -278,13 +316,16 @@ pub fn verify_detached(
         .verify_bytes(data)
         .map_err(|_| OpenPgpError::BadSignature)?;
     let helper = verifier.into_helper();
-    Ok(VerificationResult {
-        validity: helper.validity,
-        signer_fingerprint: helper.fingerprint,
-        signer_key_id: helper.key_id,
-        signer_primary_fingerprint: helper.primary,
-        weak_algorithm: helper.weak,
-    })
+    Ok((
+        VerificationResult {
+            validity: helper.validity,
+            signer_fingerprint: helper.fingerprint,
+            signer_key_id: helper.key_id,
+            signer_primary_fingerprint: helper.primary,
+            weak_algorithm: helper.weak,
+        },
+        helper.algorithms,
+    ))
 }
 
 #[cfg(test)]

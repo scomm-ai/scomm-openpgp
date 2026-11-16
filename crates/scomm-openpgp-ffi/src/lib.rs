@@ -444,6 +444,229 @@ pub unsafe extern "C" fn scomm_openpgp_verify_detached(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_decrypt_with_details_v1(
+    ciphertext: *const u8,
+    ciphertext_len: usize,
+    private_key: *const u8,
+    private_key_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    out: *mut *mut u8,
+    out_len: *mut usize,
+    details: *mut *mut u8,
+    details_len: *mut usize,
+) -> i32 {
+    if out.is_null() || out_len.is_null() || details.is_null() || details_len.is_null() {
+        return 1;
+    }
+    *out = ptr::null_mut();
+    *out_len = 0;
+    *details = ptr::null_mut();
+    *details_len = 0;
+    run(|| {
+        clear_error();
+        let pass = String::from_utf8_lossy(read_slice(passphrase, passphrase_len));
+        let result = scomm_openpgp_sequoia::decrypt(
+            read_slice(ciphertext, ciphertext_len),
+            read_slice(private_key, private_key_len),
+            Some(pass.as_ref()),
+            &[],
+        )?;
+        let mut evidence = json!({});
+        if let Some(id) = result.cipher {
+            evidence["contentCipher"] = algorithm("observed", "openpgp.symmetric", id);
+        }
+        if let Some(id) = result.aead {
+            evidence["aeadMode"] = algorithm("observed", "openpgp.aead", id);
+            evidence["integrity"] = json!({"state":"verified","value":"aead_passed"});
+        }
+        if let Some(id) = result.recipient_algorithm {
+            evidence["recipientAlgorithm"] = algorithm("observed", "openpgp.public_key", id);
+        }
+        if let Some(id) = result.recipient_key_id {
+            evidence["localRecipientKeyId"] = json!({"state":"observed","value":id.to_hex()});
+        }
+        let details_text = json!({
+            "version":1, "protocol":"openpgp", "source":"native_operation",
+            "operation":"decrypt", "state":"succeeded", "evidence":evidence,
+        })
+        .to_string();
+        write_buf(&result.plaintext, out, out_len);
+        write_buf(details_text.as_bytes(), details, details_len);
+        Ok(0)
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_verify_detached_with_details_v1(
+    data: *const u8,
+    data_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+    public_key: *const u8,
+    public_key_len: usize,
+    verdict: *mut *mut u8,
+    verdict_len: *mut usize,
+    details: *mut *mut u8,
+    details_len: *mut usize,
+) -> i32 {
+    if verdict.is_null() || verdict_len.is_null() || details.is_null() || details_len.is_null() {
+        return 1;
+    }
+    *verdict = ptr::null_mut();
+    *verdict_len = 0;
+    *details = ptr::null_mut();
+    *details_len = 0;
+    run(|| {
+        clear_error();
+        let (result, algorithms) = scomm_openpgp_sequoia::verify_detached_with_details(
+            read_slice(data, data_len),
+            read_slice(signature, signature_len),
+            read_slice(public_key, public_key_len),
+        )?;
+        let (validity, state) = match result.validity {
+            SignatureValidity::CryptographicallyValid => ("valid", "succeeded"),
+            SignatureValidity::CryptographicallyInvalid => ("invalid", "failed"),
+            SignatureValidity::UnknownSigner => ("unknown-signer", "incomplete"),
+            SignatureValidity::MalformedSignature => ("malformed", "failed"),
+            SignatureValidity::UnsupportedAlgorithm => ("unsupported", "unsupported"),
+        };
+        let mut evidence = json!({});
+        if let Some((version, public_key, hash)) = algorithms {
+            evidence["signatureValidity"] = json!({"state":"verified","value":"valid"});
+            evidence["signatureVersion"] = json!({"state":"observed","value":version});
+            evidence["signatureAlgorithm"] =
+                algorithm("observed", "openpgp.public_key", public_key);
+            evidence["digestAlgorithm"] = algorithm("observed", "openpgp.hash", hash);
+        }
+        if validity == "valid" {
+            if let Some(fp) = result.signer_fingerprint.as_ref() {
+                evidence["signerFingerprint"] = json!({"state":"verified","value":fp.to_hex()});
+            }
+        }
+        let verdict_text = json!({
+            "validity":validity,
+            "signer_fingerprint":result.signer_fingerprint.map(|f| f.to_hex()),
+            "signer_primary_fingerprint":result.signer_primary_fingerprint.map(|f| f.to_hex()),
+            "signer_key_id":result.signer_key_id.map(|k| k.to_hex()),
+            "weak_algorithm":result.weak_algorithm,
+        })
+        .to_string();
+        let details_text = json!({
+            "version":1, "protocol":"openpgp", "source":"native_operation",
+            "operation":"verify_detached", "state":state, "evidence":evidence,
+        })
+        .to_string();
+        write_buf(verdict_text.as_bytes(), verdict, verdict_len);
+        write_buf(details_text.as_bytes(), details, details_len);
+        Ok(0)
+    })
+}
+
+fn algorithm(state: &str, namespace: &str, id: u8) -> Value {
+    json!({"state":state,"value":{"namespace":namespace,"id":id}})
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_inspect_public_envelope_v1(
+    envelope: *const u8,
+    envelope_len: usize,
+    input_kind: u32,
+    input_extent: u32,
+    details: *mut *mut u8,
+    details_len: *mut usize,
+) -> i32 {
+    use scomm_openpgp_sequoia::{inspect_public_envelope, PublicPacket};
+    if details.is_null() || details_len.is_null() {
+        return 1;
+    }
+    *details = ptr::null_mut();
+    *details_len = 0;
+    if envelope.is_null()
+        || envelope_len == 0
+        || !matches!(input_kind, 1 | 2)
+        || !matches!(input_extent, 1 | 2)
+    {
+        return 1;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut evidence = json!({});
+        let (state, limit) = if input_extent == 2 {
+            ("unavailable", Some("unsupported_input_extent"))
+        } else if envelope_len > 256 * 1024 {
+            ("unavailable", Some("input_bytes"))
+        } else {
+            match inspect_public_envelope(read_slice(envelope, envelope_len), input_kind == 2) {
+                Ok(result) => {
+                    if let Some(format) = result.format {
+                        evidence["format"] = json!({"state":"declared","value":format});
+                    }
+                    if let Some(id) = result.cipher {
+                        evidence["contentCipher"] = algorithm("declared", "openpgp.symmetric", id);
+                    }
+                    if let Some(id) = result.aead {
+                        evidence["aeadMode"] = algorithm("declared", "openpgp.aead", id);
+                    }
+                    let entries: Vec<_> = result
+                        .packets
+                        .into_iter()
+                        .map(|p| match p {
+                            PublicPacket::Recipient {
+                                version,
+                                algorithm: id,
+                            } => json!({
+                                "version":{"state":"declared","value":version},
+                                "algorithm":algorithm("declared", "openpgp.public_key", id),
+                            }),
+                            PublicPacket::Signature {
+                                version,
+                                algorithm: id,
+                                hash,
+                            } => json!({
+                                "version":{"state":"declared","value":version},
+                                "algorithm":algorithm("declared", "openpgp.public_key", id),
+                                "digest":algorithm("declared", "openpgp.hash", hash),
+                            }),
+                        })
+                        .collect();
+                    let key = if input_kind == 2 {
+                        "signers"
+                    } else {
+                        "recipients"
+                    };
+                    evidence[key] = json!({"complete":result.limit.is_none(),"entries":entries});
+                    (
+                        if result.limit.is_none() {
+                            "complete"
+                        } else {
+                            "partial"
+                        },
+                        result.limit,
+                    )
+                }
+                Err(_) => ("malformed", None),
+            }
+        };
+        let mut report = json!({
+            "version":1,"protocol":"openpgp","source":"public_inspection",
+            "operation":"inspect_public_envelope","state":state,"evidence":evidence,
+        });
+        if let Some(limit) = limit {
+            report["limit"] = json!(limit);
+        }
+        let text = report.to_string();
+        if text.len() > 16 * 1024 {
+            return 2;
+        }
+        write_buf(text.as_bytes(), details, details_len);
+        0
+    })) {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn scomm_openpgp_test_passphrase(
     private_key: *const u8,
     private_key_len: usize,
@@ -1207,6 +1430,124 @@ pub unsafe extern "C" fn scomm_prims_pkcs8_public_spki(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inspection_is_declared_and_refuses_prefix_and_oversized_inputs() {
+        use super::*;
+        fn inspect(bytes: &[u8], extent: u32) -> Value {
+            let mut out = ptr::null_mut();
+            let mut len = 0;
+            unsafe {
+                let code = scomm_openpgp_inspect_public_envelope_v1(
+                    bytes.as_ptr(),
+                    bytes.len(),
+                    1,
+                    extent,
+                    &mut out,
+                    &mut len,
+                );
+                assert_eq!(code, 0);
+                assert!(len <= 16 * 1024);
+                let decoded = serde_json::from_slice(read_slice(out, len)).unwrap();
+                scomm_openpgp_buffer_free(out, len);
+                decoded
+            }
+        }
+        // SEIPD v2 declares a cipher and an AEAD mode. The dummy payload
+        // cannot establish integrity, and the inspector never checks it.
+        let mut bytes = vec![0xd2, 52, 2, 9, 2, 0];
+        bytes.extend([0; 48]);
+        let report = inspect(&bytes, 1);
+        assert_eq!(report["source"], "public_inspection");
+        assert_eq!(report["evidence"]["contentCipher"]["state"], "declared");
+        assert_eq!(report["evidence"]["contentCipher"]["value"]["id"], 9);
+        assert!(report["evidence"].get("integrity").is_none());
+        assert_eq!(inspect(&bytes, 2)["limit"], "unsupported_input_extent");
+        assert_eq!(inspect(&vec![0; 256 * 1024 + 1], 1)["limit"], "input_bytes");
+    }
+
+    #[test]
+    fn details_preserve_decrypt_and_verify_results() {
+        use super::*;
+        let pgp = engine();
+        let key = pgp
+            .generate_key(&GenerateKeyOptions {
+                userid: "Test <test@example.com>".into(),
+                passphrase: None,
+                profile: KeyProfile::ClassicalCv25519,
+            })
+            .unwrap();
+        let data = b"message security details fixture";
+        let ciphertext = pgp
+            .encrypt(data, &[&key.public], &EncryptOptions { armored: false })
+            .unwrap();
+        let signature = pgp
+            .sign(
+                data,
+                &key.secret,
+                None,
+                &SignOptions {
+                    armored: false,
+                    detached: true,
+                },
+            )
+            .unwrap();
+        let inspect = scomm_openpgp_sequoia::inspect_public_envelope(&ciphertext, false).unwrap();
+        assert_eq!(inspect.format, Some("seipd_v2"));
+        assert_eq!(inspect.packets.len(), 1);
+
+        unsafe {
+            let (mut out, mut len) = (ptr::null_mut(), 0);
+            let (mut details, mut details_len) = (ptr::null_mut(), 0);
+            assert_eq!(
+                scomm_openpgp_decrypt_with_details_v1(
+                    ciphertext.as_ptr(),
+                    ciphertext.len(),
+                    key.secret.as_ptr(),
+                    key.secret.len(),
+                    ptr::null(),
+                    0,
+                    &mut out,
+                    &mut len,
+                    &mut details,
+                    &mut details_len,
+                ),
+                0
+            );
+            assert_eq!(read_slice(out, len), data);
+            let evidence: Value = serde_json::from_slice(read_slice(details, details_len)).unwrap();
+            assert_eq!(evidence["evidence"]["integrity"]["value"], "aead_passed");
+            assert_eq!(evidence["evidence"]["integrity"]["state"], "verified");
+            scomm_openpgp_buffer_free(out, len);
+            scomm_openpgp_buffer_free(details, details_len);
+
+            assert_eq!(
+                scomm_openpgp_verify_detached_with_details_v1(
+                    data.as_ptr(),
+                    data.len(),
+                    signature.bytes.as_ptr(),
+                    signature.bytes.len(),
+                    key.public.as_ptr(),
+                    key.public.len(),
+                    &mut out,
+                    &mut len,
+                    &mut details,
+                    &mut details_len,
+                ),
+                0
+            );
+            let verdict: Value = serde_json::from_slice(read_slice(out, len)).unwrap();
+            let evidence: Value = serde_json::from_slice(read_slice(details, details_len)).unwrap();
+            assert_eq!(verdict["validity"], "valid");
+            assert_eq!(
+                evidence["evidence"]["signatureValidity"]["state"],
+                "verified"
+            );
+            assert!(evidence["evidence"]["digestAlgorithm"]["value"]["id"].is_number());
+            scomm_openpgp_buffer_free(out, len);
+            scomm_openpgp_buffer_free(details, details_len);
+        }
+    }
+
     #[test]
     fn links_openssl_4_1() {
         let version = crate::prims::openssl_version();

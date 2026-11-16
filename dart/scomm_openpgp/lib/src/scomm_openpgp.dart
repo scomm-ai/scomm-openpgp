@@ -7,6 +7,71 @@ import 'package:ffi/ffi.dart';
 
 import 'types.dart';
 
+typedef _DetailsDecryptN = ffi.Int32 Function(
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _DetailsDecryptD = int Function(
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _DetailsVerifyN = ffi.Int32 Function(
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _DetailsVerifyD = int Function(
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _DetailsInspectN = ffi.Int32 Function(
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Uint32,
+  ffi.Uint32,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _DetailsInspectD = int Function(
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  int,
+  int,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+
 typedef _AbiVersionN = ffi.Uint32 Function();
 typedef _AbiVersionD = int Function();
 typedef _BufferFreeN = ffi.Void Function(ffi.Pointer<ffi.Uint8>, ffi.Size);
@@ -779,6 +844,178 @@ class ScommOpenPgp {
         throw ScommOpenPgpException(rc, _readLastError());
       }
       return Uint8List.fromList(_take(outPtr.value, outLen.value));
+    });
+  }
+
+  late final _DetailsDecryptD? _detailsDecrypt =
+      _lib.providesSymbol('scomm_openpgp_decrypt_with_details_v1')
+      ? _lib.lookupFunction<_DetailsDecryptN, _DetailsDecryptD>(
+          'scomm_openpgp_decrypt_with_details_v1',
+        )
+      : null;
+
+  late final _DetailsVerifyD? _detailsVerify =
+      _lib.providesSymbol('scomm_openpgp_verify_detached_with_details_v1')
+      ? _lib.lookupFunction<_DetailsVerifyN, _DetailsVerifyD>(
+          'scomm_openpgp_verify_detached_with_details_v1',
+        )
+      : null;
+
+  late final _DetailsInspectD? _detailsInspect =
+      _lib.providesSymbol('scomm_openpgp_inspect_public_envelope_v1')
+      ? _lib.lookupFunction<_DetailsInspectN, _DetailsInspectD>(
+          'scomm_openpgp_inspect_public_envelope_v1',
+        )
+      : null;
+
+  /// Optional versioned native metadata. A malformed diagnostic cannot
+  /// change the independently decoded operation result.
+  Map<String, Object?>? _takeSecurityEvidence(
+    ffi.Pointer<ffi.Uint8> pointer,
+    int length,
+  ) {
+    if (pointer == ffi.nullptr) return null;
+    try {
+      if (length <= 0 || length > 16 * 1024) return null;
+      final parsed = jsonDecode(utf8.decode(pointer.asTypedList(length)));
+      if (parsed is! Map<String, Object?> || parsed['version'] != 1)
+        return null;
+      return parsed;
+    } on FormatException {
+      return null;
+    } finally {
+      _bufferFree(pointer, length);
+    }
+  }
+
+  /// Inspects a complete small artifact without using a key or decrypting.
+  /// A null result means this engine has no compatible metadata support.
+  Map<String, Object?>? inspectPublicEnvelope(
+    List<int> envelope, {
+    bool detachedSignature = false,
+  }) {
+    final inspect = _detailsInspect;
+    if (inspect == null || envelope.isEmpty || envelope.length > 256 * 1024) {
+      return null;
+    }
+    return using((arena) {
+      final input = _copy(arena, envelope);
+      final out = arena<ffi.Pointer<ffi.Uint8>>();
+      final length = arena<ffi.Size>();
+      final status = inspect(
+        input.ptr,
+        input.len,
+        detachedSignature ? 2 : 1,
+        1,
+        out,
+        length,
+      );
+      final details = _takeSecurityEvidence(out.value, length.value);
+      return status == 0 ? details : null;
+    });
+  }
+
+  ({OpenPgpSignatureVerdict verdict, Map<String, Object?>? evidence})
+  verifyWithDetails({
+    required List<int> data,
+    required List<int> signature,
+    required List<int> publicKey,
+  }) {
+    final verify = _detailsVerify;
+    if (verify == null) {
+      return (
+        verdict: verifyDetachedVerdict(
+          data: data,
+          signature: signature,
+          publicKey: publicKey,
+        ),
+        evidence: null,
+      );
+    }
+    return using((arena) {
+      final body = _copy(arena, data);
+      final sig = _copy(arena, signature);
+      final key = _copy(arena, publicKey);
+
+      final verdict = arena<ffi.Pointer<ffi.Uint8>>();
+      final verdictLength = arena<ffi.Size>();
+      final evidence = arena<ffi.Pointer<ffi.Uint8>>();
+      final evidenceLength = arena<ffi.Size>();
+      final code = verify(
+        body.ptr,
+        body.len,
+        sig.ptr,
+        sig.len,
+        key.ptr,
+        key.len,
+
+        verdict,
+        verdictLength,
+        evidence,
+        evidenceLength,
+      );
+      final details = _takeSecurityEvidence(
+        evidence.value,
+        evidenceLength.value,
+      );
+      final bytes = _take(verdict.value, verdictLength.value);
+      if (code != 0) throw ScommOpenPgpException(code, _readLastError());
+      return (
+        verdict: OpenPgpSignatureVerdict.fromJson(
+          jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>,
+        ),
+        evidence: details,
+      );
+    });
+  }
+
+  ({Uint8List result, Map<String, Object?>? evidence}) decryptWithDetails({
+    required List<int> ciphertext,
+    required List<int> privateKey,
+    String passphrase = '',
+  }) {
+    final open = _detailsDecrypt;
+    if (open == null) {
+      return (
+        result: decrypt(
+          ciphertext: ciphertext,
+          privateKey: privateKey,
+          passphrase: passphrase,
+        ),
+        evidence: null,
+      );
+    }
+    return using((arena) {
+      final ct = _copy(arena, ciphertext);
+      final key = _copy(arena, privateKey);
+      final pass = _copy(arena, utf8.encode(passphrase));
+      final plaintext = arena<ffi.Pointer<ffi.Uint8>>();
+      final plaintextLength = arena<ffi.Size>();
+
+      final evidence = arena<ffi.Pointer<ffi.Uint8>>();
+      final evidenceLength = arena<ffi.Size>();
+      final code = open(
+        ct.ptr,
+        ct.len,
+        key.ptr,
+        key.len,
+        pass.ptr,
+        pass.len,
+        plaintext,
+        plaintextLength,
+
+        evidence,
+        evidenceLength,
+      );
+      final details = _takeSecurityEvidence(
+        evidence.value,
+        evidenceLength.value,
+      );
+      final bytes = _take(plaintext.value, plaintextLength.value);
+
+      if (code != 0) throw ScommOpenPgpException(code, _readLastError());
+
+      return (result: Uint8List.fromList(bytes), evidence: details);
     });
   }
 

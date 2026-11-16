@@ -122,6 +122,17 @@ int32_t scomm_prims_pkcs8_public_spki(const uint8_t *pkcs8, size_t pkcs8_len,
 int32_t scomm_prims_csr_create(const uint8_t *pkcs8, size_t pkcs8_len,
     const uint8_t *subject, size_t subject_len, uint8_t **out, size_t *out_len);
 
+/* Optional evidence JSON. Free each returned buffer with scomm_openpgp_buffer_free. */
+int32_t scomm_openpgp_decrypt_with_details_v1(const uint8_t *ciphertext, size_t ciphertext_len,
+    const uint8_t *private_key, size_t private_key_len,
+    const uint8_t *passphrase, size_t passphrase_len, uint8_t **out, size_t *out_len,
+    uint8_t **details, size_t *details_len);
+int32_t scomm_openpgp_verify_detached_with_details_v1(const uint8_t *data, size_t data_len,
+    const uint8_t *signature, size_t signature_len, const uint8_t *public_key, size_t public_key_len,
+    uint8_t **verdict, size_t *verdict_len, uint8_t **details, size_t *details_len);
+int32_t scomm_openpgp_inspect_public_envelope_v1(const uint8_t *envelope, size_t envelope_len,
+    uint32_t input_kind, uint32_t input_extent, uint8_t **details, size_t *details_len);
+
 #ifdef __cplusplus
 }
 #endif

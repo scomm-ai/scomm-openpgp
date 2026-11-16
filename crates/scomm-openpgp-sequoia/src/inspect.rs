@@ -159,3 +159,96 @@ pub fn message(data: &[u8]) -> Result<MessageInfo> {
     }
     Ok(info)
 }
+
+pub enum PublicPacket {
+    Recipient {
+        version: u8,
+        algorithm: u8,
+    },
+    Signature {
+        version: u8,
+        algorithm: u8,
+        hash: u8,
+    },
+}
+
+#[derive(Default)]
+pub struct PublicEnvelope {
+    pub packets: Vec<PublicPacket>,
+    pub format: Option<&'static str>,
+    pub cipher: Option<u8>,
+    pub aead: Option<u8>,
+    pub limit: Option<&'static str>,
+}
+
+/// Only inspect complete, small artifacts. Stop at the encrypted body or
+/// any other container. The existing readers own armor and packet framing.
+pub fn inspect_public_envelope(data: &[u8], detached: bool) -> Result<PublicEnvelope> {
+    use sequoia_openpgp::packet::SEIP;
+    use sequoia_openpgp::parse::PacketParserBuilder;
+
+    const MAX_BYTES: usize = 256 * 1024;
+    let mut result = PublicEnvelope::default();
+    if data.len() > MAX_BYTES {
+        result.limit = Some("input_bytes");
+        return Ok(result);
+    }
+    let mut reader = PacketParserBuilder::from_bytes(data)
+        .and_then(|builder| builder.max_packet_size(MAX_BYTES as u32).build())
+        .map_err(|_| OpenPgpError::MalformedMessage)?;
+    let mut examined = 0;
+    while let PacketParserResult::Some(packet) = reader {
+        examined += 1;
+        match &packet.packet {
+            Packet::PKESK(p) if !detached => {
+                if result.packets.len() < 16 {
+                    result.packets.push(PublicPacket::Recipient {
+                        version: p.version(),
+                        algorithm: u8::from(p.pk_algo()),
+                    });
+                } else {
+                    result.limit = Some("returned_entries");
+                }
+            }
+            Packet::SKESK(_) if !detached => {}
+            Packet::Signature(s) if detached => {
+                if result.packets.len() < 16 {
+                    result.packets.push(PublicPacket::Signature {
+                        version: s.version(),
+                        algorithm: u8::from(s.pk_algo()),
+                        hash: u8::from(s.hash_algo()),
+                    });
+                } else {
+                    result.limit = Some("returned_entries");
+                }
+            }
+            Packet::SEIP(p) if !detached => {
+                match p {
+                    SEIP::V1(_) => result.format = Some("seipd_v1"),
+                    SEIP::V2(p) => {
+                        result.format = Some("seipd_v2");
+                        result.cipher = Some(u8::from(p.symmetric_algo()));
+                        result.aead = Some(u8::from(p.aead()));
+                    }
+                    _ => {}
+                }
+                result.limit = Some("encrypted_payload_boundary");
+                break;
+            }
+            _ => {
+                result.limit = Some("unsupported_packet");
+                break;
+            }
+        }
+        if examined == 64 {
+            result.limit = Some("entries");
+            break;
+        }
+        // Never recurse into compressed, literal or encrypted data.
+        reader = packet.next().map_err(|_| OpenPgpError::MalformedMessage)?.1;
+    }
+    if !detached && result.format.is_none() && result.limit.is_none() {
+        result.limit = Some("no_encrypted_container");
+    }
+    Ok(result)
+}
