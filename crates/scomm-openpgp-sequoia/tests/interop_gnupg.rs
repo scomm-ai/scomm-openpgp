@@ -336,6 +336,7 @@ fn scomm_to_and_from_live_gnupg() {
                 userid: "Scomm <scomm@example.com>".into(),
                 passphrase: None,
                 profile,
+                ..Default::default()
             })
             .expect("generate")
     };

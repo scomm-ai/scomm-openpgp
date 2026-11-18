@@ -80,6 +80,7 @@ fn server_verifier_accepts_sign_pop() {
             userid: "Pop <pop@example.com>".into(),
             passphrase: None,
             profile: KeyProfile::Rfc9980MlDsa65,
+            ..Default::default()
         })
         .expect("generate");
     let message = b"artifact-pop";

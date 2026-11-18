@@ -211,6 +211,39 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
     json_out: *mut *mut u8,
     json_len: *mut usize,
 ) -> i32 {
+    scomm_openpgp_generate_with_validity(
+        userid,
+        userid_len,
+        passphrase,
+        passphrase_len,
+        profile,
+        0,
+        public_out,
+        public_len,
+        secret_out,
+        secret_len,
+        json_out,
+        json_len,
+    )
+}
+
+/// ABI 6. As `scomm_openpgp_generate`, valid for `validity_years` from now
+/// (1 to 10). 0 keeps the engine's previous default lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn scomm_openpgp_generate_with_validity(
+    userid: *const u8,
+    userid_len: usize,
+    passphrase: *const u8,
+    passphrase_len: usize,
+    profile: i32,
+    validity_years: u32,
+    public_out: *mut *mut u8,
+    public_len: *mut usize,
+    secret_out: *mut *mut u8,
+    secret_len: *mut usize,
+    json_out: *mut *mut u8,
+    json_len: *mut usize,
+) -> i32 {
     let userid = String::from_utf8_lossy(read_slice(userid, userid_len)).into_owned();
     let pass = if passphrase.is_null() || passphrase_len == 0 {
         None
@@ -232,6 +265,7 @@ pub unsafe extern "C" fn scomm_openpgp_generate(
             userid,
             passphrase: pass,
             profile,
+            validity_years: (validity_years != 0).then_some(validity_years),
         })?;
         unsafe {
             write_buf(&generated.public, public_out, public_len);
@@ -1475,6 +1509,7 @@ mod tests {
                 passphrase: None,
                 // v6: mail to a v4 key is SEIPDv1 (Thunderbird interop).
                 profile: KeyProfile::Rfc9580Cv25519,
+                ..Default::default()
             })
             .unwrap();
         let data = b"message security details fixture";

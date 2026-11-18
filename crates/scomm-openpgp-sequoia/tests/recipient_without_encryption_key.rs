@@ -31,6 +31,7 @@ fn gen(userid: &str, profile: KeyProfile) -> GeneratedKey {
             userid: userid.into(),
             passphrase: None,
             profile,
+            ..Default::default()
         })
         .expect("generate")
 }

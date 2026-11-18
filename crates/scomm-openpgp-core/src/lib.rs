@@ -11,4 +11,5 @@ pub use provider::OpenPgpProvider;
 pub use types::*;
 
 /// FFI / Dart ABI version. Bump when the C ABI breaks.
-pub const ABI_VERSION: u32 = 5;
+/// 6: `scomm_openpgp_generate_with_validity` (key lifetime in years).
+pub const ABI_VERSION: u32 = 6;

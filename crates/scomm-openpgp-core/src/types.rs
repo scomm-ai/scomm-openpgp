@@ -112,7 +112,14 @@ pub struct GenerateKeyOptions {
     pub userid: String,
     pub passphrase: Option<String>,
     pub profile: KeyProfile,
+    /// Key lifetime from creation, in years ([MIN_VALIDITY_YEARS] to
+    /// [MAX_VALIDITY_YEARS]). `None` keeps Sequoia's default (3 years).
+    pub validity_years: Option<u32>,
 }
+
+/// Shortest and longest key lifetime [GenerateKeyOptions] accepts.
+pub const MIN_VALIDITY_YEARS: u32 = 1;
+pub const MAX_VALIDITY_YEARS: u32 = 10;
 
 impl Default for GenerateKeyOptions {
     fn default() -> Self {
@@ -120,6 +127,7 @@ impl Default for GenerateKeyOptions {
             userid: String::new(),
             passphrase: None,
             profile: KeyProfile::ClassicalCv25519,
+            validity_years: None,
         }
     }
 }

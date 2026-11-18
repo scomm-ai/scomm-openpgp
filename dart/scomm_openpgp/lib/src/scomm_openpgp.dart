@@ -122,6 +122,34 @@ typedef _GenerateD = int Function(
   ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
   ffi.Pointer<ffi.Size>,
 );
+typedef _GenerateValidityN = ffi.Int32 Function(
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.Size,
+  ffi.Int32,
+  ffi.Uint32,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
+typedef _GenerateValidityD = int Function(
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  int,
+  int,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+  ffi.Pointer<ffi.Size>,
+);
 typedef _Rfc9980ReadyN = ffi.Int32 Function();
 typedef _Rfc9980ReadyD = int Function();
 typedef _ExportN = ffi.Int32 Function(
@@ -451,9 +479,19 @@ class ScommOpenPgp {
     );
   }
 
+  /// ABI 6. Looked up on first use, so older native libraries still
+  /// load; passing [generateKey]'s `validityYears` to one throws.
+  late final _GenerateValidityD _generateWithValidity = _lib
+      .lookupFunction<_GenerateValidityN, _GenerateValidityD>(
+    'scomm_openpgp_generate_with_validity',
+  );
+
+  /// [validityYears] (1 to 10) sets how long the key or its certificates
+  /// stay valid from now. Null keeps the native default.
   GeneratedOpenPgpKey generateKey({
     required String userid,
     String passphrase = '',
+    int? validityYears,
     OpenPgpKeyProfile profile = OpenPgpKeyProfile.classicalCv25519,
   }) {
     return using((arena) {
@@ -465,19 +503,34 @@ class ScommOpenPgp {
       final secLen = arena<ffi.Size>();
       final jsonPtr = arena<ffi.Pointer<ffi.Uint8>>();
       final jsonLen = arena<ffi.Size>();
-      final code = _generate(
-        user.ptr,
-        user.len,
-        pass.ptr,
-        pass.len,
-        profile.wire,
-        pubPtr,
-        pubLen,
-        secPtr,
-        secLen,
-        jsonPtr,
-        jsonLen,
-      );
+      final code = validityYears == null
+          ? _generate(
+              user.ptr,
+              user.len,
+              pass.ptr,
+              pass.len,
+              profile.wire,
+              pubPtr,
+              pubLen,
+              secPtr,
+              secLen,
+              jsonPtr,
+              jsonLen,
+            )
+          : _generateWithValidity(
+              user.ptr,
+              user.len,
+              pass.ptr,
+              pass.len,
+              profile.wire,
+              validityYears,
+              pubPtr,
+              pubLen,
+              secPtr,
+              secLen,
+              jsonPtr,
+              jsonLen,
+            );
       if (code != 0) {
         throw ScommOpenPgpException(code, _readLastError());
       }

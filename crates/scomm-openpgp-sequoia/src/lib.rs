@@ -72,6 +72,14 @@ impl OpenPgpProvider for SequoiaOpenPgp {
             ));
         }
         let mut builder = CertBuilder::general_purpose(Some(options.userid.as_str()));
+        if let Some(years) = options.validity_years {
+            if !(MIN_VALIDITY_YEARS..=MAX_VALIDITY_YEARS).contains(&years) {
+                return Err(OpenPgpError::InvalidArgument("validity_years".into()));
+            }
+            // Average Gregorian year, as the S/MIME certificates use.
+            let secs = u64::from(years) * 31_556_952;
+            builder = builder.set_validity_period(std::time::Duration::from_secs(secs));
+        }
         builder = match options.profile {
             // v4 is the Thunderbird / GnuPG interop key: advertise SEIPDv1 only,
             // so senders (Scomm included) never pick SEIPDv2, which those

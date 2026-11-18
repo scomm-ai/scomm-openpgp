@@ -19,6 +19,7 @@ fn gen(userid: &str) -> GeneratedKey {
             userid: userid.into(),
             passphrase: None,
             profile: KeyProfile::ClassicalCv25519,
+            ..Default::default()
         })
         .expect("generate")
 }
@@ -163,6 +164,7 @@ fn passphrase_protected_decrypt() {
             userid: "Locked <locked@example.com>".into(),
             passphrase: Some("correct-horse".into()),
             profile: KeyProfile::ClassicalCv25519,
+            ..Default::default()
         })
         .unwrap();
     let ct = p
@@ -187,6 +189,7 @@ fn rfc9980_generate_encrypt_sign_when_supported() {
             userid: "Pqc <pqc@example.com>".into(),
             passphrase: None,
             profile: KeyProfile::Rfc9980MlDsa65,
+            ..Default::default()
         })
         .expect("rfc9980 generate");
     assert!(key.info.is_pqc(), "expected PQC catalog/ids: {:?}", key.info);
@@ -246,6 +249,7 @@ fn rfc9580_classical_roundtrip_and_v4_still_decrypts() {
             userid: "Ada <ada@example.com>".into(),
             passphrase: None,
             profile: KeyProfile::Rfc9580Cv25519,
+            ..Default::default()
         })
         .expect("v6 generate");
     assert_eq!(primary_key_version(&v6.public), 6);
@@ -296,6 +300,7 @@ fn rfc9980_message_is_aes256_seipdv2_and_pop_signature_verifies() {
             userid: "Pqc <pqc@example.com>".into(),
             passphrase: None,
             profile: KeyProfile::Rfc9980MlDsa65,
+            ..Default::default()
         })
         .unwrap();
     let ct = p
@@ -407,6 +412,7 @@ fn catalog_names_describe_the_real_algorithm() {
                 userid: "Alice <alice@example.com>".into(),
                 passphrase: None,
                 profile,
+                ..Default::default()
             })
             .expect("generate");
         let (primary, subs) = names_of(&key.public);
@@ -448,6 +454,7 @@ fn curve_secret_matches_cert_for_v4_and_v6() {
                 userid: "Alice <alice@example.com>".into(),
                 passphrase: None,
                 profile,
+                ..Default::default()
             })
             .expect("generate");
         let cert = sequoia_openpgp::Cert::from_bytes(&key.public).unwrap();
@@ -486,6 +493,7 @@ fn mail_to_a_v4_key_is_seipdv1() {
             userid: "Tb <tb@example.com>".into(),
             passphrase: None,
             profile: KeyProfile::ClassicalCv25519,
+            ..Default::default()
         })
         .expect("generate");
     let ct = pgp()

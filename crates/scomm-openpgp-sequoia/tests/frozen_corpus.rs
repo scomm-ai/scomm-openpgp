@@ -70,6 +70,7 @@ fn add_missing_fixtures() {
                     userid: format!("Frozen {name} <frozen-{name}@example.com>"),
                     passphrase: None,
                     profile,
+                    ..Default::default()
                 })
                 .unwrap();
             write_new(&format!("{name}.pub"), &key.public);

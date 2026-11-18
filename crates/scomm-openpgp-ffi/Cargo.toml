@@ -17,4 +17,4 @@ serde_json = "1"
 openssl.workspace = true
 openssl-sys = { version = "0.9.114", features = ["vendored"] }
 ossl = { version = "1.5.2", default-features = false, features = ["openssl-sys", "rfc9580"] }
-scomm-smime-ffi = { git = "https://github.com/scomm-ai/scomm-smime", rev = "e96b8b11d9b85f45534b0793e9cfcabf64691848" }
+scomm-smime-ffi = { git = "https://github.com/scomm-ai/scomm-smime", rev = "f6c3139311d27cd3335f49b8131aac18bc639221" }
