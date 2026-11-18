@@ -344,13 +344,39 @@ fn scomm_to_and_from_live_gnupg() {
     gpg.run(&["--import", "v4.sec"]).expect("gpg takes a v4 key");
     m.case(
         "Scomm v4 key: Scomm encrypts, gpg decrypts",
-        Gap("H4"),
+        Works,
         (|| {
             let ct = pgp()
                 .encrypt(&plaintext, &[&v4.public], &EncryptOptions::default())
                 .map_err(|e| format!("{e:?}"))?;
             gpg.write("v4.pgp", &ct);
             gpg.run(&["--output", "v4.txt", "--decrypt", "v4.pgp"]).map(|_| ())
+        })(),
+    );
+    m.case(
+        "Scomm v4 key: Scomm signs, gpg verifies",
+        Works,
+        (|| {
+            let sig = pgp()
+                .sign(&plaintext, &v4.secret, None, &SignOptions::default())
+                .map_err(|e| format!("{e:?}"))?;
+            gpg.write("v4.sig", &sig.bytes);
+            gpg.run(&["--verify", "v4.sig", "plaintext.bin"]).map(|_| ())
+        })(),
+    );
+    m.case(
+        "Scomm v4 key: gpg encrypts, Scomm decrypts",
+        Works,
+        (|| {
+            gpg.run(&["-r", "scomm@example.com", "--output", "v4in.pgp", "--encrypt", "plaintext.bin"])?;
+            let out = pgp()
+                .decrypt(&gpg.read("v4in.pgp"), &v4.secret, None)
+                .map_err(|e| format!("{e:?}"))?;
+            if out.plaintext == plaintext {
+                Ok(())
+            } else {
+                Err("wrong plaintext".into())
+            }
         })(),
     );
     for (name, profile) in [

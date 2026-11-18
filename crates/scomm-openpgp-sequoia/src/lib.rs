@@ -13,7 +13,7 @@ use sequoia_openpgp::cert::CipherSuite;
 use sequoia_openpgp::packet::signature::SignatureBuilder;
 use sequoia_openpgp::packet::{key, Key};
 use sequoia_openpgp::types::{
-    AEADAlgorithm, Curve, PublicKeyAlgorithm, SignatureType, SymmetricAlgorithm,
+    AEADAlgorithm, Curve, Features, PublicKeyAlgorithm, SignatureType, SymmetricAlgorithm,
 };
 use sequoia_openpgp::Cert;
 use sequoia_openpgp::KeyHandle;
@@ -73,7 +73,13 @@ impl OpenPgpProvider for SequoiaOpenPgp {
         }
         let mut builder = CertBuilder::general_purpose(Some(options.userid.as_str()));
         builder = match options.profile {
-            KeyProfile::ClassicalCv25519 => builder.set_cipher_suite(CipherSuite::Cv25519),
+            // v4 is the Thunderbird / GnuPG interop key: advertise SEIPDv1 only,
+            // so senders (Scomm included) never pick SEIPDv2, which those
+            // clients cannot decrypt.
+            KeyProfile::ClassicalCv25519 => builder
+                .set_cipher_suite(CipherSuite::Cv25519)
+                .set_features(Features::empty().set_seipdv1())
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?,
             KeyProfile::Rfc9580Cv25519 => builder
                 .set_profile(Profile::RFC9580)
                 .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?

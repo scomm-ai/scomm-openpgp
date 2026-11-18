@@ -1473,7 +1473,8 @@ mod tests {
             .generate_key(&GenerateKeyOptions {
                 userid: "Test <test@example.com>".into(),
                 passphrase: None,
-                profile: KeyProfile::ClassicalCv25519,
+                // v6: mail to a v4 key is SEIPDv1 (Thunderbird interop).
+                profile: KeyProfile::Rfc9580Cv25519,
             })
             .unwrap();
         let data = b"message security details fixture";

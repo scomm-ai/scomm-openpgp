@@ -432,3 +432,80 @@ fn catalog_names_describe_the_real_algorithm() {
         .unwrap();
     assert_eq!(names_of(&cert.to_vec().unwrap()).0, "openpgp-rsa2048");
 }
+
+/// The classical publish proof needs the raw Curve25519 scalars. v4 keys keep
+/// them as legacy EdDSA / ECDH MPIs (the ECDH one byte-reversed); v6 keys as
+/// native bytes. Either way the scalar must derive a public key in the cert.
+#[test]
+fn curve_secret_matches_cert_for_v4_and_v6() {
+    use openssl::pkey::{Id, PKey};
+    use sequoia_openpgp::crypto::mpi::PublicKey as P;
+    use sequoia_openpgp::parse::Parse;
+
+    for profile in [KeyProfile::ClassicalCv25519, KeyProfile::Rfc9580Cv25519] {
+        let key = pgp()
+            .generate_key(&GenerateKeyOptions {
+                userid: "Alice <alice@example.com>".into(),
+                passphrase: None,
+                profile,
+            })
+            .expect("generate");
+        let cert = sequoia_openpgp::Cert::from_bytes(&key.public).unwrap();
+        let want_version = if profile == KeyProfile::ClassicalCv25519 { 4 } else { 6 };
+        assert_eq!(cert.primary_key().key().version(), want_version, "{profile:?}");
+        let publics: Vec<Vec<u8>> = cert
+            .keys()
+            .map(|ka| match ka.key().mpis() {
+                P::Ed25519 { a } => a.to_vec(),
+                P::X25519 { u } => u.to_vec(),
+                P::EdDSA { q, .. } | P::ECDH { q, .. } => q.value()[1..].to_vec(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        for (signing, id) in [(true, Id::ED25519), (false, Id::X25519)] {
+            let scalar = pgp()
+                .export_curve_secret(&key.secret, None, signing)
+                .unwrap_or_else(|e| panic!("{profile:?} signing={signing}: {e}"));
+            let derived = PKey::private_key_from_raw_bytes(&scalar, id)
+                .unwrap()
+                .raw_public_key()
+                .unwrap();
+            assert!(publics.contains(&derived), "{profile:?} signing={signing}");
+        }
+    }
+}
+
+/// Thunderbird and GnuPG read only v3 PKESK + SEIPDv1. A v4 key from Scomm
+/// must not advertise SEIPDv2, or Scomm itself would send it unreadable mail.
+#[test]
+fn mail_to_a_v4_key_is_seipdv1() {
+    use sequoia_openpgp::{Packet, PacketPile};
+
+    let key = pgp()
+        .generate_key(&GenerateKeyOptions {
+            userid: "Tb <tb@example.com>".into(),
+            passphrase: None,
+            profile: KeyProfile::ClassicalCv25519,
+        })
+        .expect("generate");
+    let ct = pgp()
+        .encrypt(b"hi", &[&key.public], &EncryptOptions::default())
+        .expect("encrypt");
+    let pile = PacketPile::from_bytes(&ct).unwrap();
+    let mut seen = (false, false);
+    for p in pile.children() {
+        match p {
+            Packet::PKESK(k) => {
+                assert_eq!(k.version(), 3);
+                seen.0 = true;
+            }
+            Packet::SEIP(s) => {
+                assert_eq!(s.version(), 1);
+                seen.1 = true;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(seen, (true, true));
+    assert_eq!(pgp().decrypt(&ct, &key.secret, None).unwrap().plaintext, b"hi");
+}
