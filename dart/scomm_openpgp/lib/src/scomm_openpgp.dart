@@ -461,6 +461,9 @@ class ScommOpenPgp {
 
   int get abiVersion => _abiVersion();
 
+  /// NIST P-256/P-384/P-521 generation in both v4 and v6.
+  bool get supportsNistCurves => abiVersion >= 7;
+
   bool get rfc9980Ready => _rfc9980Ready() != 0;
 
   /// Version text of the linked libcrypto, such as `OpenSSL 4.1.0 23 Oct 2026`.
@@ -494,6 +497,9 @@ class ScommOpenPgp {
     int? validityYears,
     OpenPgpKeyProfile profile = OpenPgpKeyProfile.classicalCv25519,
   }) {
+    if (profile.wire >= 3 && !supportsNistCurves) {
+      throw UnsupportedError('NIST curve generation requires OpenPGP ABI 7');
+    }
     return using((arena) {
       final user = _copy(arena, utf8.encode(userid));
       final pass = _copy(arena, utf8.encode(passphrase));

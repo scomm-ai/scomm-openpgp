@@ -390,3 +390,71 @@ fn scomm_to_and_from_live_gnupg() {
     }
     m.finish("Live GnuPG");
 }
+#[test]
+fn nist_v4_profiles_interoperate_with_gnupg() {
+    let Some(gpg) = Gpg::start("nist-curves") else {
+        return;
+    };
+    let data = b"NIST curve interoperability";
+    gpg.write("nist.msg", data);
+    for profile in [
+        KeyProfile::ClassicalP256,
+        KeyProfile::ClassicalP384,
+        KeyProfile::ClassicalP521,
+    ] {
+        let key = pgp()
+            .generate_key(&GenerateKeyOptions {
+                userid: "NIST Curves <nist@example.com>".into(),
+                profile,
+                ..Default::default()
+            })
+            .unwrap();
+        let fingerprint = key.info.fingerprint.to_hex();
+        gpg.write("nist.secret", &key.secret);
+        gpg.run(&["--import", "nist.secret"]).unwrap();
+        let sig = pgp()
+            .sign(data, &key.secret, None, &SignOptions::default())
+            .unwrap();
+        gpg.write("nist.sig", &sig.bytes);
+        gpg.run(&["--verify", "nist.sig", "nist.msg"]).unwrap();
+        let encrypted = pgp()
+            .encrypt(data, &[&key.public], &EncryptOptions { armored: false })
+            .unwrap();
+        gpg.write("nist.pgp", &encrypted);
+        gpg.run(&["--output", "nist.open", "--decrypt", "nist.pgp"])
+            .unwrap();
+        assert_eq!(gpg.read("nist.open"), data);
+        gpg.run(&[
+            "--local-user",
+            &fingerprint,
+            "--output",
+            "gpg.sig",
+            "--detach-sign",
+            "nist.msg",
+        ])
+        .unwrap();
+        assert_eq!(
+            pgp()
+                .verify(data, &gpg.read("gpg.sig"), &key.public)
+                .unwrap()
+                .validity,
+            SignatureValidity::CryptographicallyValid
+        );
+        gpg.run(&[
+            "--recipient",
+            &fingerprint,
+            "--output",
+            "gpg.pgp",
+            "--encrypt",
+            "nist.msg",
+        ])
+        .unwrap();
+        assert_eq!(
+            pgp()
+                .decrypt(&gpg.read("gpg.pgp"), &key.secret, None)
+                .unwrap()
+                .plaintext,
+            data
+        );
+    }
+}

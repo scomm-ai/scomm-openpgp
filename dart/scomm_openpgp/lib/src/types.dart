@@ -169,7 +169,15 @@ enum OpenPgpKeyProfile {
 
   /// RFC 9580 Ed25519/X25519. Personal Security default when the native
   /// library accepts profile id 2.
-  rfc9580Classical(2);
+  rfc9580Classical(2),
+
+  /// ABI 7: NIST curves; the first three use v4, the last three v6.
+  classicalP256(3),
+  classicalP384(4),
+  classicalP521(5),
+  rfc9580P256(6),
+  rfc9580P384(7),
+  rfc9580P521(8);
 
   const OpenPgpKeyProfile(this.wire);
   final int wire;

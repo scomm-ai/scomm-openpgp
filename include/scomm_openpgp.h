@@ -19,6 +19,8 @@ int32_t scomm_openpgp_inspect(
     const uint8_t *key, size_t key_len,
     uint8_t **json_out, size_t *json_len);
 
+/* Profiles: 0 = Curve25519 v4, 1 = PQC v6, 2 = Curve25519 v6.
+ * ABI 7 adds 3/4/5 = P-256/P-384/P-521 v4, 6/7/8 = those curves v6. */
 int32_t scomm_openpgp_generate(
     const uint8_t *userid, size_t userid_len,
     const uint8_t *passphrase, size_t passphrase_len,

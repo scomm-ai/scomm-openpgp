@@ -254,6 +254,12 @@ pub unsafe extern "C" fn scomm_openpgp_generate_with_validity(
         0 => KeyProfile::ClassicalCv25519,
         1 => KeyProfile::Rfc9980MlDsa65,
         2 => KeyProfile::Rfc9580Cv25519,
+        3 => KeyProfile::ClassicalP256,
+        4 => KeyProfile::ClassicalP384,
+        5 => KeyProfile::ClassicalP521,
+        6 => KeyProfile::Rfc9580P256,
+        7 => KeyProfile::Rfc9580P384,
+        8 => KeyProfile::Rfc9580P521,
         _ => {
             set_error("unknown key profile".into());
             return OpenPgpError::InvalidArgument("profile".into()).code();
@@ -1464,6 +1470,62 @@ pub unsafe extern "C" fn scomm_prims_pkcs8_public_spki(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nist_profiles_cross_the_c_abi_and_reject_unknown_profiles() {
+        use super::*;
+        let userid = b"Native Curves <curves@example.com>";
+        for profile in 3..=8 {
+            let (mut public, mut public_len, mut secret, mut secret_len, mut json, mut json_len) =
+                (ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut(), 0);
+            let code = unsafe {
+                scomm_openpgp_generate_with_validity(
+                    userid.as_ptr(),
+                    userid.len(),
+                    ptr::null(),
+                    0,
+                    profile,
+                    2,
+                    &mut public,
+                    &mut public_len,
+                    &mut secret,
+                    &mut secret_len,
+                    &mut json,
+                    &mut json_len,
+                )
+            };
+            assert_eq!(code, 0, "profile {profile}");
+            let info: Value = unsafe { serde_json::from_slice(read_slice(json, json_len)).unwrap() };
+            let curve = ["p256", "p384", "p521"][(profile as usize - 3) % 3];
+            assert_eq!(info["algorithm"], format!("openpgp-ecdsa-{curve}"));
+            unsafe {
+                scomm_openpgp_buffer_free(public, public_len);
+                scomm_openpgp_buffer_free(secret, secret_len);
+                scomm_openpgp_buffer_free(json, json_len);
+            }
+        }
+        let (mut p, mut pl, mut s, mut sl, mut j, mut jl) =
+            (ptr::null_mut(), 0, ptr::null_mut(), 0, ptr::null_mut(), 0);
+        assert_ne!(
+            unsafe {
+                scomm_openpgp_generate(
+                    userid.as_ptr(),
+                    userid.len(),
+                    ptr::null(),
+                    0,
+                    99,
+                    &mut p,
+                    &mut pl,
+                    &mut s,
+                    &mut sl,
+                    &mut j,
+                    &mut jl,
+                )
+            },
+            0
+        );
+        assert!(p.is_null() && s.is_null() && j.is_null());
+    }
+
     #[test]
     fn inspection_is_declared_and_refuses_prefix_and_oversized_inputs() {
         use super::*;

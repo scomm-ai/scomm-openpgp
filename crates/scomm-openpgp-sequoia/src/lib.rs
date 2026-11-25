@@ -92,6 +92,30 @@ impl OpenPgpProvider for SequoiaOpenPgp {
                 .set_profile(Profile::RFC9580)
                 .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
                 .set_cipher_suite(CipherSuite::Cv25519),
+            KeyProfile::ClassicalP256 => builder
+                .set_cipher_suite(CipherSuite::P256)
+                .set_features(Features::empty().set_seipdv1())
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?,
+            KeyProfile::ClassicalP384 => builder
+                .set_cipher_suite(CipherSuite::P384)
+                .set_features(Features::empty().set_seipdv1())
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?,
+            KeyProfile::ClassicalP521 => builder
+                .set_cipher_suite(CipherSuite::P521)
+                .set_features(Features::empty().set_seipdv1())
+                .map_err(|e| OpenPgpError::Internal(e.to_string()))?,
+            KeyProfile::Rfc9580P256 => builder
+                .set_profile(Profile::RFC9580)
+                .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
+                .set_cipher_suite(CipherSuite::P256),
+            KeyProfile::Rfc9580P384 => builder
+                .set_profile(Profile::RFC9580)
+                .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
+                .set_cipher_suite(CipherSuite::P384),
+            KeyProfile::Rfc9580P521 => builder
+                .set_profile(Profile::RFC9580)
+                .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?
+                .set_cipher_suite(CipherSuite::P521),
             KeyProfile::Rfc9980MlDsa65 => builder
                 .set_profile(Profile::RFC9580)
                 .map_err(|e| OpenPgpError::UnsupportedAlgorithm(e.to_string()))?

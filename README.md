@@ -49,3 +49,7 @@ cargo test -p scomm-openpgp-sequoia --no-default-features --features openssl
 This repository: LGPL-2.0-or-later (see `LICENSE`).
 
 `sequoia-openpgp` 2.4.1: LGPL-2.0-or-later — exact text in `THIRD_PARTY_LICENSES/sequoia-openpgp-2.4.1-LICENSE.txt`.
+
+### Classical NIST curves (ABI 7)
+
+Generation profiles 3/4/5 select P-256/P-384/P-521 with v4 packets; 6/7/8 select the same curves with RFC 9580 v6 packets. Each profile uses ECDSA signing and ECDH encryption. Existing profiles 0/1/2 and defaults are unchanged. Dart exposes the corresponding `OpenPgpKeyProfile` values and `supportsNistCurves`; older libraries reject these profiles.

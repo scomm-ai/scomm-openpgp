@@ -12,4 +12,5 @@ pub use types::*;
 
 /// FFI / Dart ABI version. Bump when the C ABI breaks.
 /// 6: `scomm_openpgp_generate_with_validity` (key lifetime in years).
-pub const ABI_VERSION: u32 = 6;
+/// 7: additive NIST curve generation profiles 3 through 8.
+pub const ABI_VERSION: u32 = 7;

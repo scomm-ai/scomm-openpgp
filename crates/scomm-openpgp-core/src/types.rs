@@ -105,6 +105,18 @@ pub enum KeyProfile {
     Rfc9980MlDsa65,
     /// RFC 9580 Ed25519 primary + X25519 encryption subkey (v6).
     Rfc9580Cv25519,
+    /// NIST P256, version 4: ECDSA signing and ECDH encryption.
+    ClassicalP256,
+    /// NIST P384, version 4: ECDSA signing and ECDH encryption.
+    ClassicalP384,
+    /// NIST P521, version 4: ECDSA signing and ECDH encryption.
+    ClassicalP521,
+    /// NIST P256, version 6: ECDSA signing and ECDH encryption.
+    Rfc9580P256,
+    /// NIST P384, version 6: ECDSA signing and ECDH encryption.
+    Rfc9580P384,
+    /// NIST P521, version 6: ECDSA signing and ECDH encryption.
+    Rfc9580P521,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
